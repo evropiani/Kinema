@@ -333,3 +333,49 @@ final class VersionTests: XCTestCase {
         XCTAssertFalse(Versions.isNewer("1.0.0-beta", than: "1.0.0"))
     }
 }
+
+final class VidHubSettingsTests: XCTestCase {
+    func testPrefersTheChosenKindOfSubtitles() {
+        var external = MediaStream(index: 9, type: .subtitle, codec: "subrip", language: "eng", isExternal: true)
+        external.isTextSubtitleStream = true
+        let source = MediaSource(id: "m", container: "mkv", mediaStreams: [
+            MediaStream(index: 0, type: .video, codec: "h264"),
+            MediaStream(index: 1, type: .audio, codec: "aac", language: "eng"),
+            MediaStream(index: 2, type: .subtitle, codec: "subrip", language: "eng"),
+            external,
+        ])
+        XCTAssertEqual(StreamResolver.subtitleIndex(source, mode: .always, language: "eng", audioLanguage: "eng"), 2)
+        XCTAssertEqual(StreamResolver.subtitleIndex(source, mode: .always, language: "eng", audioLanguage: "eng", prefer: .external), 9)
+        XCTAssertEqual(StreamResolver.subtitleIndex(source, mode: .always, language: "eng", audioLanguage: "eng", prefer: .embedded), 2)
+        XCTAssertEqual(StreamResolver.subtitleIndex(source, mode: .always, language: "eng", audioLanguage: "eng", embedded: false), 9)
+    }
+
+    func testTurnsMarkersIntoSegments() {
+        let markers = SkipMarkers(introEnd: 90, creditsFromEnd: 120)
+        let segments = markers.segments(duration: 2700)
+        XCTAssertEqual(segments.map(\.type), ["Intro", "Outro"])
+        XCTAssertEqual(segments[0].end, 90, accuracy: 0.01)
+        XCTAssertEqual(segments[1].start, 2580, accuracy: 0.01)
+        XCTAssertTrue(SkipMarkers().segments(duration: 100).isEmpty)
+        XCTAssertTrue(SkipMarkers(creditsFromEnd: 500).segments(duration: 300).isEmpty)
+    }
+
+    func testReadsNewSettingsAndBuffers() throws {
+        let json = #"{"maxCacheMB":500,"rememberSpeed":true,"lastSpeed":1.5,"subtitleSource":"external","seekSensitivity":"high","concurrentDownloads":3}"#
+        let settings = try JSONDecoder().decode(Settings.self, from: Data(json.utf8))
+        XCTAssertEqual(settings.startSpeed, 1.5)
+        XCTAssertEqual(settings.subtitleSource, .external)
+        XCTAssertEqual(settings.seekSensitivity.factor, 2)
+        XCTAssertEqual(settings.concurrentDownloads, 3)
+        XCTAssertEqual(settings.forwardBuffer(bitrate: 20_000_000), 200, accuracy: 0.01)
+        XCTAssertEqual(Settings().forwardBuffer(bitrate: 20_000_000), 0)
+        XCTAssertTrue(Settings().preloadNextEpisode)
+    }
+
+    func testReadsItemCounts() throws {
+        let counts = try JSONDecoder().decode(ItemCounts.self, from: Data(#"{"MovieCount":11,"SeriesCount":1,"EpisodeCount":"7"}"#.utf8))
+        XCTAssertEqual(counts.movies, 11)
+        XCTAssertEqual(counts.episodes, 7)
+        XCTAssertEqual(counts.collections, 0)
+    }
+}

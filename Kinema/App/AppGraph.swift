@@ -14,6 +14,7 @@ final class AppGraph {
     let auth = AuthRepository()
     let ui = AppUI()
     let updates = UpdateChecker()
+    let markers = MarkersStore()
     // Lazy only so they can be handed `self`; all of them are created in init.
     private(set) lazy var library = LibraryStore(graph: self)
     private(set) lazy var downloads = DownloadManager(graph: self)
@@ -44,6 +45,17 @@ final class AppGraph {
 
     /** The device profile for the connection in use. */
     func deviceProfile(maxBitrate: Int? = nil) -> DeviceProfile {
-        DeviceProfileBuilder.build(DeviceSupport.capabilities, maxBitrate: maxBitrate ?? self.maxBitrate, allowDirectPlay: settings.settings.directPlay)
+        DeviceProfileBuilder.build(capabilities, maxBitrate: maxBitrate ?? self.maxBitrate, allowDirectPlay: settings.settings.directPlay)
+    }
+
+    /** What the phone decodes, less what was turned off in Settings → Playback. */
+    var capabilities: DeviceCapabilities {
+        var caps = DeviceSupport.capabilities
+        let s = settings.settings
+        caps.hevc = caps.hevc && s.allowHEVC
+        caps.av1 = caps.av1 && s.allowAV1
+        caps.dolbyVision = caps.dolbyVision && s.allowDolbyVision && caps.hevc
+        caps.hdr = caps.hdr && caps.hevc
+        return caps
     }
 }

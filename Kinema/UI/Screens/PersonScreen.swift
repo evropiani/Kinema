@@ -78,7 +78,7 @@ struct PersonScreen: View {
     private func grid(_ title: String, _ items: [Item]) -> some View {
         if !items.isEmpty {
             SectionHeader(title).padding(.top, 18)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 170), spacing: 12, alignment: .top)], spacing: 18) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.posterGridMinimum, maximum: theme.posterGridMinimum * 1.6), spacing: 12, alignment: .top)], spacing: 18) {
                 ForEach(items) { PosterCard(item: $0) }
             }
             .padding(.horizontal, 16)

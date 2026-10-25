@@ -17,7 +17,8 @@ struct RootView: View {
             case .system: return systemScheme == .dark
             }
         }()
-        let accent = ArtworkColor.parseHex(settings.accent) ?? 0xFF6F_8FEF
+        // The logo's blue; title pages take their own colour from the artwork.
+        let accent: UInt32 = 0xFF6F_8FEF
         let theme = KinemaTheme(
             colors: .make(dark: dark, accent: accent, night: settings.nightMode),
             radii: .of(settings.corners),

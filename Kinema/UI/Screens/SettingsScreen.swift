@@ -31,17 +31,19 @@ struct SettingsScreen: View {
                 }
             }
             Section {
+                link(.general, "General", "gearshape.fill", 0x8E8E93)
                 link(.appearance, "Appearance", "paintbrush.fill", 0x8A7CF0)
                 link(.home, "Home Page", "house.fill", 0x4AA8D8)
             }
             Section {
                 link(.playback, "Playback", "play.rectangle.fill", 0xE5734A)
-                link(.gestures, "Gestures & Controls", "hand.draw.fill", 0x4BB38A)
+                link(.gestures, "Player", "hand.draw.fill", 0x4BB38A)
                 link(.subtitles, "Subtitles", "captions.bubble.fill", 0xE2B13C)
+                link(.capture, "Screenshots & GIFs", "camera.fill", 0xD9536F)
             }
             Section {
                 link(.downloads, "Downloads", "arrow.down.circle.fill", 0x6F8FEF)
-                link(.storage, "Storage", "internaldrive.fill", 0x8E8E93)
+                link(.storage, "Storage", "internaldrive.fill", 0x636366)
             }
             Section {
                 link(.about, "About Kinema", "info.circle.fill", 0x3B4E7B)
@@ -76,11 +78,13 @@ struct SettingsPageView: View {
         Group {
             switch page {
             case .accounts: AccountsPage()
+            case .general: GeneralPage()
             case .appearance: AppearancePage()
             case .home: HomePage()
             case .playback: PlaybackPage()
-            case .gestures: GesturesPage()
+            case .gestures: PlayerPage()
             case .subtitles: SubtitlesPage()
+            case .capture: CapturePage()
             case .downloads: DownloadsPage()
             case .storage: StoragePage()
             case .about: AboutPage()
@@ -165,12 +169,110 @@ private struct AccountsPage: View {
     }
 }
 
+// ---------------------------------------------------------------- general --
+
+private struct GeneralPage: View {
+    @Environment(\.kinema) private var theme
+    @State private var counts: ItemCounts?
+    @State private var scanning = false
+
+    var body: some View {
+        let graph = AppGraph.shared
+        let store = graph.settings
+        List {
+            Section {
+                Toggle("Hide spoilers", isOn: setting(\.hideSpoilers))
+            } footer: {
+                Text("Hides the descriptions and pictures of episodes you haven't watched yet.")
+            }
+            Section {
+                Picker("Sort libraries by", selection: Binding(
+                    get: { store.settings.defaultSort },
+                    set: { raw in store.update {
+                        $0.defaultSort = raw
+                        $0.defaultSortDescending = LibrarySort(rawValue: raw)?.naturallyDescending ?? false
+                    } }
+                )) {
+                    ForEach(LibrarySort.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
+                }
+                Picker("Order", selection: setting(\.defaultSortDescending)) {
+                    Text("Ascending").tag(false)
+                    Text("Descending").tag(true)
+                }
+            } header: {
+                Text("Browsing")
+            } footer: {
+                Text("How the Library is sorted when it opens; ascending is A to Z, oldest or lowest first. Each library can still be sorted its own way.")
+            }
+            Section {
+                Toggle("Ask before streaming on mobile data", isOn: setting(\.askOnCellular))
+            } footer: {
+                Text("Downloads always play without asking.")
+            }
+            if !graph.library.views.isEmpty {
+                Section {
+                    ForEach(graph.library.videoViews) { view in
+                        Toggle(view.name, isOn: Binding(
+                            get: { !store.settings.hiddenLibraries.contains(view.id) },
+                            set: { on in store.update { s in
+                                if on { s.hiddenLibraries.removeAll { $0 == view.id } } else { s.hiddenLibraries.append(view.id) }
+                            } }
+                        ))
+                    }
+                } header: {
+                    Text("Libraries")
+                } footer: {
+                    Text("Libraries turned off don't show in the Library tab or on Home.")
+                }
+            }
+            Section {
+                if let counts {
+                    LabeledContent("Films", value: counts.movies.formatted())
+                    LabeledContent("Shows", value: counts.series.formatted())
+                    LabeledContent("Episodes", value: counts.episodes.formatted())
+                    if counts.collections > 0 { LabeledContent("Collections", value: counts.collections.formatted()) }
+                } else {
+                    ProgressView()
+                }
+                if graph.auth.isAdmin {
+                    Button {
+                        Task {
+                            scanning = true
+                            do {
+                                try await graph.auth.client?.scanLibraries()
+                                graph.messages.show("The server is scanning your libraries.", .success)
+                            } catch {
+                                graph.messages.error(JellyfinError.from(error).localizedDescription)
+                            }
+                            scanning = false
+                        }
+                    } label: {
+                        HStack {
+                            Text("Scan All Libraries")
+                            Spacer()
+                            if scanning { ProgressView() }
+                        }
+                    }
+                    .disabled(scanning)
+                }
+            } header: {
+                Text("Your Library")
+            } footer: {
+                Text("Watched, progress and favourites are kept on your server, so they're the same on every device. Film and show details come from the server, in the language set there.")
+            }
+        }
+        .navigationTitle("General")
+        .task {
+            await graph.library.loadViews()
+            counts = try? await graph.auth.client?.itemCounts()
+        }
+    }
+}
+
 // ------------------------------------------------------------- appearance --
 
 private struct AppearancePage: View {
     @Environment(\.kinema) private var theme
-
-    private static let accents = ["#6F8FEF", "#3B4E7B", "#7C8CFF", "#E5734A", "#FF5F7A", "#E2B13C", "#4BB38A", "#4AA8D8", "#C35BD1", "#FFFFFF"]
 
     var body: some View {
         let s = AppGraph.shared.settings.settings
@@ -184,45 +286,49 @@ private struct AppearancePage: View {
                 Text("Night mode turns dark into pure black, for OLED screens.")
             }
             Section {
-                Picker("Colour", selection: setting(\.accentMode)) {
-                    ForEach(AccentMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(Self.accents, id: \.self) { hex in
-                            Button { AppGraph.shared.settings.update { $0.accent = hex } } label: {
-                                Circle()
-                                    .fill(Color(hex: hex) ?? .blue)
-                                    .frame(width: 34, height: 34)
-                                    .overlay(Circle().strokeBorder(s.accent.uppercased() == hex ? theme.colors.ink : .clear, lineWidth: 3))
-                            }
-                            .buttonStyle(PressScaleStyle())
-                            .accessibilityLabel(hex)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            } header: {
-                Text("Accent")
-            } footer: {
-                Text("From the artwork, each title's page takes its colour from its poster. The chosen colour is used everywhere else.")
-            }
-            Section("Shape") {
                 Picker("Corners", selection: setting(\.corners)) {
                     ForEach(CornerStyle.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 Picker("Poster size", selection: setting(\.posterSize)) {
                     ForEach(PosterSize.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
+                PosterSizePreview(size: s.posterSize)
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+            } header: {
+                Text("Shape")
+            } footer: {
+                Text("Poster size sets how big posters are everywhere: in the Library (\(s.posterSize.columns) to a row on iPhone), on Home, in search and on actors' pages.")
             }
             Section {
-                Toggle("Artwork behind pages", isOn: setting(\.backdrops))
+                Toggle("Blurred artwork behind title pages", isOn: setting(\.backdrops))
                 Toggle("Reduce motion", isOn: setting(\.reduceMotion))
             } footer: {
-                Text("Reduce motion stops the carousel on Home from moving by itself and calms the animations.")
+                Text("With blurred artwork on, the page of a film, show or actor sits on a soft, darkened copy of its picture instead of the plain background. Reduce motion stops the carousel on Home from moving by itself and calms the animations.")
             }
         }
         .navigationTitle("Appearance")
+    }
+}
+
+/** A row of posters at the chosen size, so the setting shows what it does. */
+private struct PosterSizePreview: View {
+    @Environment(\.kinema) private var theme
+    let size: PosterSize
+
+    var body: some View {
+        let width = theme.posterWidth * 0.62
+        HStack(spacing: 8) {
+            ForEach(0..<6, id: \.self) { i in
+                RoundedRectangle(cornerRadius: theme.radii.xs, style: .continuous)
+                    .fill(LinearGradient(colors: [theme.colors.accent.opacity(0.7 - Double(i) * 0.08), theme.colors.accent.opacity(0.2)], startPoint: .top, endPoint: .bottom))
+                    .frame(width: width, height: width * 1.5)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: theme.posterWidth * 0.62 * 1.5, alignment: .leading)
+        .clipped()
+        .animation(theme.spring, value: size)
+        .accessibilityHidden(true)
     }
 }
 
@@ -256,7 +362,7 @@ private struct HomePage: View {
             } header: {
                 Text("Shown, in this order")
             } footer: {
-                Text("Drag to reorder.")
+                Text("Drag to reorder. Which libraries appear is set in General → Libraries.")
             }
             if !hidden.isEmpty {
                 Section("Hidden") {
@@ -276,24 +382,9 @@ private struct HomePage: View {
             Section {
                 Toggle("One row for Continue Watching and Next Up", isOn: setting(\.mergeNextUp))
             }
-            if !graph.library.videoViews.isEmpty {
-                Section {
-                    ForEach(graph.library.videoViews) { view in
-                        Toggle(view.name, isOn: Binding(
-                            get: { !store.settings.hiddenLibraries.contains(view.id) },
-                            set: { on in store.update { s in
-                                if on { s.hiddenLibraries.removeAll { $0 == view.id } } else { s.hiddenLibraries.append(view.id) }
-                            } }
-                        ))
-                    }
-                } header: {
-                    Text("Libraries on Home")
-                }
-            }
         }
         .environment(\.editMode, $editMode)
         .navigationTitle("Home Page")
-        .task { await graph.library.loadViews() }
     }
 }
 
@@ -316,6 +407,24 @@ private struct PlaybackPage: View {
             } footer: {
                 Text("Files over the limit are converted by the server. With direct play off, everything goes through the server, which can help with files that won't play.")
             }
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Maximum cache")
+                        Spacer()
+                        Text(cacheLabel(s.maxCacheMB)).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Slider(value: Binding(
+                        get: { Double(s.maxCacheMB) },
+                        set: { value in AppGraph.shared.settings.update { $0.maxCacheMB = Int((value / 100).rounded()) * 100 } }
+                    ), in: 0...4000, step: 100)
+                }
+                Toggle("Preload the next episode", isOn: setting(\.preloadNextEpisode))
+            } header: {
+                Text("Loading")
+            } footer: {
+                Text("The maximum cache is how much video Kinema loads ahead while you watch: more rides out a shaky connection and uses more memory; Automatic lets iOS decide. Preloading gets the next episode ready near the end of the one playing, so it starts at once.")
+            }
             Section("Starting") {
                 Picker("Resume", selection: setting(\.resume)) {
                     ForEach(ResumeBehavior.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -323,6 +432,7 @@ private struct PlaybackPage: View {
                 Picker("Default speed", selection: setting(\.defaultSpeed)) {
                     ForEach(Settings.speeds, id: \.self) { Text(String(format: "%g×", $0)).tag($0) }
                 }
+                Toggle("Always remember the playback speed", isOn: setting(\.rememberSpeed))
                 Picker("Picture", selection: setting(\.aspect)) {
                     ForEach(AspectMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
@@ -333,9 +443,9 @@ private struct PlaybackPage: View {
                     Stepper("Countdown: \(s.upNextCountdown)s", value: setting(\.upNextCountdown), in: 3...30)
                 }
             } header: {
-                Text("Up Next")
+                Text("Continuous playback")
             } footer: {
-                Text("Up Next appears when the credits start (when the server knows where they are), or near the end.")
+                Text("Up Next appears when the credits start (when the server knows where they are, or you've marked them), or near the end.")
             }
             Section {
                 Picker("Intros", selection: setting(\.skipIntro)) {
@@ -350,7 +460,7 @@ private struct PlaybackPage: View {
             } header: {
                 Text("Skipping")
             } footer: {
-                Text("Uses the media segments Jellyfin 10.10 and later find (with a plugin such as Intro Skipper).")
+                Text("Uses the media segments Jellyfin 10.10 and later find (with a plugin such as Intro Skipper). Where the server finds none, mark them yourself in the player: ••• → The intro ends here / The credits start here, for every episode of the show.")
             }
             Section("Language") {
                 Picker("Audio", selection: setting(\.audioLanguage)) {
@@ -359,22 +469,56 @@ private struct PlaybackPage: View {
                 }
             }
             Section {
+                let device = DeviceSupport.capabilities
+                if device.hevc { Toggle("HEVC (H.265) and HDR", isOn: setting(\.allowHEVC)) }
+                if device.dolbyVision && s.allowHEVC { Toggle("Dolby Vision", isOn: setting(\.allowDolbyVision)) }
+                if device.av1 { Toggle("AV1", isOn: setting(\.allowAV1)) }
+            } header: {
+                Text("Hardware decoding")
+            } footer: {
+                Text("This device: \(DeviceSupport.summary). Turn a format off if videos in it stutter or show no picture; the server then converts them to H.264, which plays everywhere.")
+            }
+            Section {
                 Toggle("Picture in Picture when leaving", isOn: setting(\.autoPiP))
-                Toggle("Keep playing the sound in the background", isOn: setting(\.backgroundAudio))
+                Toggle("Background playback", isOn: setting(\.backgroundAudio))
             } header: {
                 Text("Leaving the app")
             } footer: {
-                Text("With Picture in Picture off, the sound can carry on while the app is in the background.")
+                Text("With background playback on, the sound carries on while Kinema is in the background (when Picture in Picture doesn't start).")
             }
         }
         .navigationTitle("Playback")
     }
+
+    private func cacheLabel(_ megabytes: Int) -> String {
+        if megabytes == 0 { return "Automatic" }
+        if megabytes >= 1000 { return String(format: "%.1f GB", Double(megabytes) / 1000) }
+        return "\(megabytes) MB"
+    }
 }
 
-private struct GesturesPage: View {
+private struct PlayerPage: View {
     var body: some View {
         let s = AppGraph.shared.settings.settings
         List {
+            Section {
+                Picker("Hide the controls after", selection: setting(\.controlsHideDelay)) {
+                    ForEach(Settings.hideDelays, id: \.self) { Text($0 == 0 ? "Never" : "\($0) seconds").tag($0) }
+                }
+                Toggle("Shadow behind the controls", isOn: setting(\.controlsShadow))
+                Picker("Next to the progress bar", selection: setting(\.showRemaining)) {
+                    Text("Length").tag(false)
+                    Text("Time left").tag(true)
+                }
+                Toggle("Landscape by default", isOn: setting(\.landscapeByDefault))
+                Toggle("Screenshot and GIF buttons", isOn: setting(\.showCaptureButtons))
+                Toggle("Skip Intro and Skip Credits buttons", isOn: setting(\.showSkipButtons))
+                Toggle("Previous and next episode buttons", isOn: setting(\.showEpisodeButtons))
+            } header: {
+                Text("Controls")
+            } footer: {
+                Text("With landscape off, the player turns with the phone.")
+            }
             Section {
                 Toggle("Double-tap the sides to skip", isOn: setting(\.doubleTapSeek))
                 Picker("Skip back", selection: setting(\.skipBack)) {
@@ -401,15 +545,15 @@ private struct GesturesPage: View {
                 Toggle("Brightness (left side, up and down)", isOn: setting(\.brightnessGesture))
                 Toggle("Volume (right side, up and down)", isOn: setting(\.volumeGesture))
                 Toggle("Seek (left and right)", isOn: setting(\.seekGesture))
+                if s.seekGesture {
+                    Picker("Seek sensitivity", selection: setting(\.seekSensitivity)) {
+                        ForEach(SeekSensitivity.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                }
                 Toggle("Pinch to fill the screen", isOn: setting(\.pinchToZoom))
             }
-            Section("Buttons") {
-                Toggle("Skip Intro and Skip Credits buttons", isOn: setting(\.showSkipButtons))
-                Toggle("Previous and next episode buttons", isOn: setting(\.showEpisodeButtons))
-                Toggle("Show the time left instead of the length", isOn: setting(\.showRemaining))
-            }
         }
-        .navigationTitle("Gestures & Controls")
+        .navigationTitle("Player")
     }
 }
 
@@ -424,8 +568,24 @@ private struct SubtitlesPage: View {
                     Text("As set on the server").tag("")
                     ForEach(Languages.common, id: \.0) { Text($0.1).tag($0.0) }
                 }
+                Picker("Prefer subtitles", selection: setting(\.subtitleSource)) {
+                    ForEach(SubtitleSource.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                Toggle("Load subtitles inside the video", isOn: setting(\.loadEmbeddedSubtitles))
             } header: {
                 Text("When")
+            } footer: {
+                Text("Which subtitles come on by themselves. Separate files are the .srt, .ass and similar files next to the video on your server. With subtitles inside the video off, only separate files come on by themselves; you can still pick any track in the player.")
+            }
+            Section {
+                Picker("Search in", selection: setting(\.onlineSubtitleLanguage)) {
+                    Text("The subtitle language").tag("")
+                    ForEach(Languages.common, id: \.0) { Text($0.1).tag($0.0) }
+                }
+            } header: {
+                Text("Online search")
+            } footer: {
+                Text("The language the player's Find Subtitles starts with. It remembers the last one you chose.")
             }
             Section {
                 SubtitleStylePanel()
@@ -440,20 +600,55 @@ private struct SubtitlesPage: View {
     }
 }
 
+private struct CapturePage: View {
+    var body: some View {
+        List {
+            Section {
+                Picker("Screenshot format", selection: setting(\.screenshotFormat)) {
+                    ForEach(ScreenshotFormat.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+            } footer: {
+                Text("JPEG is the most compatible, PNG keeps every pixel, HEIC is smallest.")
+            }
+            Section {
+                Picker("Frame rate", selection: setting(\.gifFrameRate)) {
+                    ForEach(Settings.gifFrameRates, id: \.self) { Text("\($0) fps").tag($0) }
+                }
+                Picker("Width", selection: setting(\.gifWidth)) {
+                    ForEach(Settings.gifWidths, id: \.self) { Text("\($0) pixels").tag($0) }
+                }
+            } header: {
+                Text("GIFs")
+            } footer: {
+                Text("Record a GIF in the player with the record button (or ••• → Record a GIF); it stops by itself after ten seconds. More frames and pixels make bigger files.")
+            }
+        }
+        .navigationTitle("Screenshots & GIFs")
+    }
+}
+
 private struct DownloadsPage: View {
     @State private var confirm = false
 
     var body: some View {
         let downloads = AppGraph.shared.downloads
+        let s = AppGraph.shared.settings.settings
         List {
             Section {
                 Picker("Quality", selection: setting(\.downloadQuality)) {
                     ForEach(DownloadQuality.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
-                Toggle("Download on mobile data", isOn: setting(\.downloadOnCellular))
                 Toggle("Save subtitles with downloads", isOn: setting(\.downloadSubtitles))
             } footer: {
                 Text("Original keeps the file as it is (repackaged by the server when iOS can't play its format). The other qualities are converted by the server and take less space.")
+            }
+            Section {
+                Toggle("Download on mobile data", isOn: setting(\.downloadOnCellular))
+                Stepper("At the same time: \(s.concurrentDownloads)", value: setting(\.concurrentDownloads), in: 1...5)
+                Toggle("Pause while a video plays", isOn: setting(\.pauseDownloadsWhilePlaying))
+                Toggle("Show progress over the tab bar", isOn: setting(\.showDownloadIndicator))
+            } footer: {
+                Text("Pausing keeps the connection free for what you're watching. The progress strip takes you to Downloads when tapped.")
             }
             Section {
                 LabeledContent("Downloaded", value: Format.fileSize(downloads.usedBytes))
@@ -474,20 +669,32 @@ private struct StoragePage: View {
     @State private var artwork = ImageLoader.shared.diskUsage
 
     var body: some View {
+        let graph = AppGraph.shared
         List {
             Section {
                 LabeledContent("Artwork cache", value: Format.fileSize(Int64(artwork)))
                 Button("Clear Artwork Cache") {
                     ImageLoader.shared.clearDisk()
                     artwork = ImageLoader.shared.diskUsage
-                    AppGraph.shared.messages.show("Cleared", .success)
+                    graph.messages.show("Cleared", .success)
                 }
             } footer: {
                 Text("Posters and backdrops are kept so pages open quickly and show offline. They come back as you browse.")
             }
             Section {
-                LabeledContent("Downloads", value: Format.fileSize(AppGraph.shared.downloads.usedBytes))
+                LabeledContent("Downloads", value: Format.fileSize(graph.downloads.usedBytes))
                 NavigationLink("Manage Downloads", value: Route.settings(.downloads))
+            }
+            if !graph.markers.all.isEmpty {
+                Section {
+                    LabeledContent("Intro and credit marks", value: Format.count(graph.markers.all.count, "show"))
+                    Button("Clear All Marks", role: .destructive) {
+                        graph.markers.clearAll()
+                        graph.messages.show("Cleared", .success)
+                    }
+                } footer: {
+                    Text("The marks you set in the player for shows whose intros and credits the server doesn't know.")
+                }
             }
         }
         .navigationTitle("Storage")

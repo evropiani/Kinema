@@ -11,13 +11,16 @@ struct PlayerControls: View {
     var body: some View {
         let player = AppGraph.shared.player
         ZStack {
-            VStack(spacing: 0) {
-                LinearGradient(colors: [.black.opacity(0.75), .clear], startPoint: .top, endPoint: .bottom).frame(height: 150)
-                Spacer()
-                LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom).frame(height: 190)
+            // The shade behind the controls (Settings → Player → Shadow behind the controls).
+            if AppGraph.shared.settings.settings.controlsShadow {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.black.opacity(0.75), .clear], startPoint: .top, endPoint: .bottom).frame(height: 150)
+                    Spacer()
+                    LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom).frame(height: 190)
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
             }
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
 
             VStack(spacing: 0) {
                 TopBar()
@@ -93,8 +96,20 @@ private struct MoreMenu: View {
                 Label(player.statsVisible ? "Hide playback info" : "Playback info", systemImage: "info.circle")
             }
             Button { player.screenshot() } label: { Label("Screenshot", systemImage: "camera") }
+            Button { player.toggleGIF() } label: {
+                Label(player.recordingGIF ? "Stop and save the GIF" : "Record a GIF", systemImage: "record.circle")
+            }
             Button { player.toggleOrientation() } label: {
                 Label(player.portrait ? "Landscape" : "Portrait", systemImage: "rectangle.portrait.rotate")
+            }
+            if player.item?.kind == .episode {
+                Section("Intro and credits for this show") {
+                    Button { player.markIntroEnd() } label: { Label("The intro ends here", systemImage: "flag") }
+                    Button { player.markCreditsStart() } label: { Label("The credits start here", systemImage: "flag.checkered") }
+                    if player.hasMarkers {
+                        Button(role: .destructive) { player.clearMarkers() } label: { Label("Clear the marks", systemImage: "flag.slash") }
+                    }
+                }
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -163,6 +178,10 @@ private struct BottomBar: View {
                 ToolButton(icon: "rectangle.stack", text: "Episodes") { player.panel = .episodes }
             }
             Spacer(minLength: 4)
+            if AppGraph.shared.settings.settings.showCaptureButtons {
+                ControlButton(icon: "camera", label: "Screenshot", size: 16) { player.screenshot() }
+                ControlButton(icon: player.recordingGIF ? "stop.circle.fill" : "record.circle", label: player.recordingGIF ? "Stop recording" : "Record a GIF", size: 16) { player.toggleGIF() }
+            }
             ToolButton(icon: aspectIcon(player.aspect), text: player.aspect.label) { player.cycleAspect() }
             ToolButton(icon: "lock.open", text: "Lock") {
                 player.locked = true
@@ -250,6 +269,14 @@ private struct Scrubber: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.22)).frame(height: dragging ? 8 : 5)
                     Capsule().fill(.white.opacity(0.35)).frame(width: width * buffered, height: dragging ? 8 : 5)
+                    // Intros and credits, as lighter stretches of the bar.
+                    ForEach(player.segments) { segment in
+                        let from = min(1, max(0, segment.start / duration))
+                        let to = min(1, max(0, segment.end / duration))
+                        Capsule().fill(.white.opacity(0.45))
+                            .frame(width: max(2, width * (to - from)), height: dragging ? 8 : 5)
+                            .offset(x: width * from)
+                    }
                     Capsule().fill(theme.colors.accent).frame(width: max(0, width * progress), height: dragging ? 8 : 5)
                     // Chapter marks: small gaps in the bar.
                     ForEach(Array(player.chapters.enumerated()), id: \.offset) { _, chapter in

@@ -45,6 +45,8 @@ final class LiveServerTests: XCTestCase {
         _ = try await client.genres(parentId: movieLibrary?.id, types: ["Movie"])
         _ = try await client.years(parentId: movieLibrary?.id, types: ["Movie"])
         _ = await client.mediaSegments(first.id)
+        let counts = try await client.itemCounts()
+        XCTAssertGreaterThan(counts.movies, 0)
 
         let profile = DeviceProfileBuilder.build(DeviceCapabilities(), maxBitrate: 120_000_000)
         func info(direct: Bool) async throws -> PlaybackInfoResponse {

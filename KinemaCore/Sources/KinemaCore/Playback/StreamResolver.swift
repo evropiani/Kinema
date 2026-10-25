@@ -127,8 +127,22 @@ enum StreamResolver {
      * The subtitle track to start with, under [mode]. [language] is the
      * preferred subtitle language; [audioLanguage] the language being heard.
      */
-    static func subtitleIndex(_ source: MediaSource, mode: SubtitleMode, language: String?, audioLanguage: String?) -> Int? {
-        let subtitles = source.subtitleStreams
+    static func subtitleIndex(
+        _ source: MediaSource,
+        mode: SubtitleMode,
+        language: String?,
+        audioLanguage: String?,
+        prefer: SubtitleSource = .any,
+        embedded: Bool = true
+    ) -> Int? {
+        var subtitles = source.subtitleStreams
+        // Embedded tracks may be left out, and one kind tried before the other.
+        if !embedded { subtitles = subtitles.filter(\.isExternal) }
+        switch prefer {
+        case .any: break
+        case .embedded: subtitles = subtitles.filter { !$0.isExternal } + subtitles.filter(\.isExternal)
+        case .external: subtitles = subtitles.filter(\.isExternal) + subtitles.filter { !$0.isExternal }
+        }
         guard !subtitles.isEmpty else { return nil }
         let wanted = (language?.isEmpty == false) ? language : nil
         func inLanguage(_ code: String?) -> [MediaStream] {

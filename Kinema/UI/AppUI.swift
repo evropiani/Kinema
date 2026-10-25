@@ -50,7 +50,15 @@ enum Route: Hashable {
 }
 
 enum SettingsPage: String, Hashable, CaseIterable {
-    case accounts, appearance, home, playback, gestures, subtitles, downloads, storage, about
+    case accounts, general, appearance, home, playback, gestures, subtitles, capture, downloads, storage, about
+}
+
+/** Playing on mobile data, waiting to be confirmed. */
+struct PendingPlay: Identifiable {
+    let id = UUID()
+    let item: Item
+    let startTicks: Int64
+    let mediaSourceId: String?
 }
 
 /** Where the sign-in screen should start when it is opened over the app. */
@@ -79,6 +87,8 @@ final class AppUI {
     var resumePrompt: Item?
     /** Choosing what to download (quality) for these items. */
     var downloadPrompt: [Item]?
+    /** About to stream on mobile data (Settings → General). */
+    var cellularPrompt: PendingPlay?
 
     /** Whether the welcome has been seen. */
     private(set) var welcomed = UserDefaults.standard.bool(forKey: "ui.welcomed")
@@ -180,8 +190,18 @@ final class AppActions {
             } else {
                 start = position
             }
+            let settings = graph.settings.settings
+            if settings.askOnCellular, graph.network.metered, graph.downloads.record(current.id)?.isDone != true {
+                ui.cellularPrompt = PendingPlay(item: current, startTicks: start, mediaSourceId: mediaSourceId)
+                return
+            }
             graph.player.open(current, startTicks: start, mediaSourceId: mediaSourceId)
         }
+    }
+
+    /** Play on mobile data after all. */
+    func playConfirmed(_ pending: PendingPlay) {
+        graph.player.open(pending.item, startTicks: pending.startTicks, mediaSourceId: pending.mediaSourceId)
     }
 
     /** What playing [item] means: itself, or the right episode or film inside it. */

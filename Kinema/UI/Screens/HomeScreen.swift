@@ -105,16 +105,16 @@ struct HomeScreen: View {
             }
         case .latest:
             ForEach(latest) { shelf in
-                MediaShelf(title: "New in \(shelf.library.name)", icon: icon(shelf.library), items: shelf.items, cardWidth: 124, seeAll: { graph.actions.navigate(.library(shelf.library)) }) {
+                MediaShelf(title: "New in \(shelf.library.name)", icon: icon(shelf.library), items: shelf.items, cardWidth: theme.posterWidth, seeAll: { graph.actions.navigate(.library(shelf.library)) }) {
                     PosterCard(item: $0)
                 }
             }
         case .favorites:
-            MediaShelf(title: "Favorites", icon: "heart.fill", items: favorites, cardWidth: 124, seeAll: favorites.count > 8 ? { graph.actions.navigate(.shelf(.favorites)) } : nil) {
+            MediaShelf(title: "Favorites", icon: "heart.fill", items: favorites, cardWidth: theme.posterWidth, seeAll: favorites.count > 8 ? { graph.actions.navigate(.shelf(.favorites)) } : nil) {
                 PosterCard(item: $0)
             }
         case .collections:
-            MediaShelf(title: "Collections", icon: "square.stack.fill", items: collections, cardWidth: 124) {
+            MediaShelf(title: "Collections", icon: "square.stack.fill", items: collections, cardWidth: theme.posterWidth) {
                 PosterCard(item: $0)
             }
         case .genres:

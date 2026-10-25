@@ -75,6 +75,17 @@ struct MainUI: View {
             Button("Start from the beginning") { graph.actions.play(item, fromStart: true) }
             Button("Cancel", role: .cancel) {}
         }
+        .confirmationDialog(
+            "You're on mobile data",
+            isPresented: Binding(get: { ui.cellularPrompt != nil }, set: { if !$0 { ui.cellularPrompt = nil } }),
+            titleVisibility: .visible,
+            presenting: ui.cellularPrompt
+        ) { pending in
+            Button("Play Anyway") { graph.actions.playConfirmed(pending) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Streaming uses mobile data, up to \(StreamingQuality.label(theme.settings.maxBitrateCellular)). You can change the limit in Settings → Playback.")
+        }
         .fullScreenCover(isPresented: Binding(get: { ui.playerOpen }, set: { if !$0 { graph.player.close() } })) {
             PlayerScreen()
                 .environment(\.kinema, theme)
@@ -157,6 +168,8 @@ private struct FloatingChrome: View {
     var body: some View {
         let ui = AppGraph.shared.ui
         let searching = ui.tab == .search
+        VStack(spacing: 8) {
+        if !typing { DownloadIndicator() }
         HStack(spacing: 10) {
             if searching {
                 // The tabs fold into one round button that goes back where you came from...
@@ -175,6 +188,7 @@ private struct FloatingChrome: View {
                     .matchedGeometryEffect(id: "search", in: glass)
                     .transition(.opacity)
             }
+        }
         }
         .padding(.horizontal, 14)
         .padding(.bottom, typing ? 8 : 2)
@@ -429,6 +443,22 @@ private struct TabStack: View {
             TabRoot(tab: tab)
                 .navigationDestination(for: Route.self) { RouteView(route: $0) }
         }
+        .modifier(FloatingDownloads())
+    }
+}
+
+/** On iOS 26 the download strip floats above the system tab bar, as one more piece of glass. */
+private struct FloatingDownloads: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.safeAreaInset(edge: .bottom, spacing: 0) {
+                DownloadIndicator()
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+            }
+        } else {
+            content
+        }
     }
 }
 
@@ -459,6 +489,45 @@ struct RouteView: View {
         case .shelf(let kind): ShelfScreen(kind: kind)
         case .downloadedSeries(let id, let name): DownloadedSeriesScreen(seriesId: id, name: name)
         case .settings(let page): SettingsPageView(page: page)
+        }
+    }
+}
+
+/**
+ * A small piece of glass over the tab bar while downloads are running (the
+ * "floating window" in Settings → Downloads): how many, and how far. Tap it
+ * for the Downloads tab.
+ */
+struct DownloadIndicator: View {
+    @Environment(\.kinema) private var theme
+
+    var body: some View {
+        let graph = AppGraph.shared
+        let active = graph.downloads.active
+        let running = active.filter { $0.state == .downloading }
+        if theme.settings.showDownloadIndicator, !active.isEmpty, graph.ui.tab != .downloads {
+            let progress = running.isEmpty ? 0 : running.reduce(0) { $0 + $1.progress } / Double(running.count)
+            Button { graph.actions.selectTab(.downloads) } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle().stroke(theme.colors.ink4, lineWidth: 3)
+                        Circle().trim(from: 0, to: progress).stroke(theme.colors.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 20, height: 20)
+                    Text(running.isEmpty ? "\(active.count) waiting to download" : "Downloading \(running.count == 1 ? "“\(running[0].item.name)”" : "\(running.count)") · \(Int(progress * 100))%")
+                        .font(KFont.labelLarge)
+                        .foregroundStyle(theme.colors.ink)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(theme.colors.ink3)
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PressScaleStyle())
+            .kinemaGlass(Capsule(), interactive: true)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 }

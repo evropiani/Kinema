@@ -50,7 +50,7 @@ struct DetailScreen: View {
                     if current.kind == .boxSet { collectionGrid }
                     castShelf(current)
                     MediaShelf(title: "Extras", icon: "film.stack", items: extras, cardWidth: 240) { LandscapeCard(item: $0) }
-                    MediaShelf(title: "More Like This", icon: "sparkles", items: similar, cardWidth: 118) { PosterCard(item: $0) }
+                    MediaShelf(title: "More Like This", icon: "sparkles", items: similar, cardWidth: theme.posterWidth) { PosterCard(item: $0) }
                     infoSection(current)
                     mediaSection(current)
                 }
@@ -332,6 +332,20 @@ struct DetailScreen: View {
             if let tmdb = item.tmdbId, let url = URL(string: "https://www.themoviedb.org/\(item.kind == .series ? "tv" : "movie")/\(tmdb)") {
                 Link(destination: url) { Label("TMDB", systemImage: "link") }
             }
+            if graph.auth.isAdmin {
+                Button {
+                    Task {
+                        do {
+                            try await graph.auth.client?.refreshMetadata(item.id)
+                            graph.messages.show("The server is refreshing \(item.name)'s details.", .success)
+                        } catch {
+                            graph.messages.error(JellyfinError.from(error).localizedDescription)
+                        }
+                    }
+                } label: {
+                    Label("Refresh details and artwork", systemImage: "arrow.clockwise")
+                }
+            }
         } label: {
             actionLabel("ellipsis", "More", on: false)
         }
@@ -356,7 +370,14 @@ struct DetailScreen: View {
                         .font(.system(size: 16, weight: .semibold).italic())
                         .foregroundStyle(c.ink)
                 }
-                if let overview = item.overview, !overview.isEmpty {
+                if let overview = item.overview, !overview.isEmpty, item.kind == .episode, theme.settings.hideSpoilers, !AppGraph.shared.library.isPlayed(item), !overviewOpen {
+                    Button { withAnimation(theme.ease) { overviewOpen = true } } label: {
+                        Label("Description hidden to avoid spoilers · Show", systemImage: "eye.slash")
+                            .font(KFont.labelLarge)
+                            .foregroundStyle(c.accent)
+                    }
+                    .buttonStyle(PressableStyle())
+                } else if let overview = item.overview, !overview.isEmpty {
                     Text(overview)
                         .font(KFont.bodyMedium)
                         .foregroundStyle(c.ink2)
@@ -483,7 +504,7 @@ struct DetailScreen: View {
         if !children.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 SectionHeader("In This Collection", icon: "square.stack.fill")
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 170), spacing: 12, alignment: .top)], spacing: 18) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.posterGridMinimum, maximum: theme.posterGridMinimum * 1.6), spacing: 12, alignment: .top)], spacing: 18) {
                     ForEach(children) { PosterCard(item: $0) }
                 }
                 .padding(.horizontal, 16)
@@ -731,6 +752,8 @@ struct EpisodeRow: View {
             HStack(alignment: .top, spacing: 12) {
                 ArtworkImage(image: episode.image(.primary) ?? episode.landscapeImage, width: 360, label: episode.name, icon: "tv")
                     .frame(width: 148, height: 84)
+                    // Hide spoilers: no pictures from episodes not seen yet.
+                    .blur(radius: spoiler ? 14 : 0)
                     .overlay {
                         Image(systemName: "play.fill")
                             .font(.system(size: 14, weight: .bold))
@@ -758,7 +781,7 @@ struct EpisodeRow: View {
                     }
                     .font(KFont.bodySmall)
                     .foregroundStyle(c.ink3)
-                    if let overview = episode.overview, !overview.isEmpty {
+                    if let overview = episode.overview, !overview.isEmpty, !spoiler {
                         Text(overview)
                             .font(KFont.bodySmall)
                             .foregroundStyle(c.ink2)
@@ -780,6 +803,11 @@ struct EpisodeRow: View {
     private var title: String {
         if let number = episode.indexNumber { return "\(number). \(episode.name)" }
         return episode.name
+    }
+
+    /** Settings → General → Hide spoilers, for an episode not watched yet. */
+    private var spoiler: Bool {
+        theme.settings.hideSpoilers && !AppGraph.shared.library.isPlayed(episode)
     }
 
     private var detail: String {

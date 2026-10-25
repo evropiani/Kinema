@@ -166,8 +166,9 @@ private struct PlayerGestureLayer: View {
             SystemVolume.value = Float(next)
             HUDState.shared.level = min(1, max(0, next))
         case .seek:
-            // A full swipe across covers up to three minutes, less for short videos.
-            let span = min(180, max(30, player.clock.duration / 3))
+            // A full swipe across covers up to three minutes (less for short
+            // videos), scaled by Settings → Player → Swipe-to-seek sensitivity.
+            let span = min(180, max(30, player.clock.duration / 3)) * settings.seekSensitivity.factor
             let target = min(player.clock.duration, max(0, startPosition + Double(dx / max(1, size.width)) * span))
             player.clock.scrubbing = target
         }
@@ -297,6 +298,19 @@ private struct PlayerHUD: View {
         let player = AppGraph.shared.player
         let hud = HUDState.shared
         ZStack {
+            if player.recordingGIF {
+                HStack(spacing: 8) {
+                    Circle().fill(.red).frame(width: 10, height: 10)
+                    Text("Recording GIF").font(.system(size: 14, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .kinemaGlass(Capsule(), shadow: false)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.top, player.holding ? 84 : 24)
+                .transition(.opacity)
+            }
             if player.holding {
                 VStack(spacing: 4) {
                     HStack(spacing: 6) {

@@ -1130,3 +1130,52 @@ enum JellyfinDate {
         return day.date(from: String(value.prefix(10)))
     }
 }
+
+/** How many of each kind of thing the server has, for Settings. */
+struct ItemCounts: Decodable, Hashable {
+    var movies: Int
+    var series: Int
+    var episodes: Int
+    var collections: Int
+
+    enum CodingKeys: String, CodingKey {
+        case movies = "MovieCount", series = "SeriesCount", episodes = "EpisodeCount", collections = "BoxSetCount"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        movies = c.int(.movies) ?? 0
+        series = c.int(.series) ?? 0
+        episodes = c.int(.episodes) ?? 0
+        collections = c.int(.collections) ?? 0
+    }
+}
+
+/**
+ * Where a series' intro ends and its credits begin, marked by hand in the
+ * player, for servers that don't find them. The credits are kept as a
+ * distance from the end, so one mark fits every episode.
+ */
+struct SkipMarkers: Codable, Hashable {
+    var introEnd: Double?
+    var creditsFromEnd: Double?
+
+    init(introEnd: Double? = nil, creditsFromEnd: Double? = nil) {
+        self.introEnd = introEnd
+        self.creditsFromEnd = creditsFromEnd
+    }
+
+    var isEmpty: Bool { introEnd == nil && creditsFromEnd == nil }
+
+    /** The marks as segments of a video [duration] seconds long. */
+    func segments(duration: Double) -> [MediaSegment] {
+        var result: [MediaSegment] = []
+        if let introEnd, introEnd > 1, duration <= 0 || introEnd < duration {
+            result.append(MediaSegment(id: "marker-intro", type: "Intro", start: 0, end: introEnd))
+        }
+        if let fromEnd = creditsFromEnd, duration > 0, fromEnd > 1, fromEnd < duration {
+            result.append(MediaSegment(id: "marker-outro", type: "Outro", start: duration - fromEnd, end: duration))
+        }
+        return result
+    }
+}

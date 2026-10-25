@@ -188,6 +188,24 @@ enum KFont {
 }
 
 extension KinemaTheme {
+    /** A poster's width in a row, from Settings → Appearance → Poster size. */
+    var posterWidth: CGFloat {
+        switch settings.posterSize {
+        case .small: return 100
+        case .medium: return 124
+        case .large: return 164
+        }
+    }
+
+    /** The narrowest a poster gets in a grid (they grow to fill the row). */
+    var posterGridMinimum: CGFloat {
+        switch settings.posterSize {
+        case .small: return 78
+        case .medium: return 104
+        case .large: return 150
+        }
+    }
+
     /** Reduce motion, from Kinema's setting or the system's. */
     var reduceMotion: Bool { settings.reduceMotion || UIAccessibility.isReduceMotionEnabled }
 
@@ -199,8 +217,7 @@ extension KinemaTheme {
 }
 
 /**
- * Tints a page with the dominant colour of an image (a poster or backdrop),
- * when the accent follows the artwork.
+ * Tints a page with the dominant colour of an image (a poster or backdrop).
  */
 private struct ArtworkTint: ViewModifier {
     @Environment(\.kinema) private var theme
@@ -208,12 +225,11 @@ private struct ArtworkTint: ViewModifier {
     @State private var sampled: UInt32?
 
     func body(content: Content) -> some View {
-        let follow = theme.settings.accentMode == .artwork
         content
-            .environment(\.kinema, follow && sampled != nil ? theme.tinted(sampled!) : theme)
-            .tint(follow && sampled != nil ? Color(argb: sampled!) : theme.colors.accent)
+            .environment(\.kinema, sampled.map { theme.tinted($0) } ?? theme)
+            .tint(sampled.map { Color(argb: $0) } ?? theme.colors.accent)
             .task(id: image) {
-                guard follow, let image else { return }
+                guard let image else { return }
                 if let hash = image.blurHash, sampled == nil, let quick = BlurHash.averageColor(hash) {
                     sampled = ArtworkColor.lift(Int((quick >> 16) & 0xff), Int((quick >> 8) & 0xff), Int(quick & 0xff))
                 }

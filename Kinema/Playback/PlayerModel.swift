@@ -107,6 +107,12 @@ final class PlayerModel: NSObject {
     @ObservationIgnored private var lastReportedTicks: Int64 = 0
     @ObservationIgnored private var nowPlayingArtwork: UIImage?
     @ObservationIgnored private(set) var trickplay: TrickplayThumbnails?
+    /** The next episode, prepared ahead: its stream asked for and its asset loading. */
+    @ObservationIgnored private var preloaded: (id: String, prepared: Prepared, asset: AVURLAsset)?
+    @ObservationIgnored private var preloadTask: Task<Void, Never>?
+    /** Recording a GIF of what's playing. */
+    private(set) var recordingGIF = false
+    @ObservationIgnored private var gifTask: Task<Void, Never>?
     @ObservationIgnored private var session = 0
 
     init(graph: AppGraph) {
@@ -175,6 +181,7 @@ final class PlayerModel: NSObject {
 
     private func begin(_ item: Item) {
         stopSession(report: true)
+        discardPreload()
         session += 1
         self.item = item
         offline = nil
@@ -212,7 +219,7 @@ final class PlayerModel: NSObject {
         holding = false
         holdLocked = false
         let settings = graph.settings.settings
-        speed = settings.defaultSpeed
+        speed = settings.startSpeed
         aspect = settings.aspect
         nowPlayingArtwork = nil
         trickplay = TrickplayThumbnails(item: item, mediaSourceId: item.primarySource?.id)
@@ -221,97 +228,139 @@ final class PlayerModel: NSObject {
             graph.ui.playerOpen = true
         }
         portrait = false
-        AppDelegate.lock(.landscape)
+        AppDelegate.lock(playerOrientation)
+        graph.downloads.pauseForPlayback(settings.pauseDownloadsWhilePlaying)
         loadArtwork(item)
+    }
+
+    /** Landscape, or turning with the phone, as chosen in Settings → Player. */
+    private var playerOrientation: UIInterfaceOrientationMask {
+        if portrait { return .portrait }
+        return graph.settings.settings.landscapeByDefault ? .landscape : .allButUpsideDown
+    }
+
+    /** Everything needed to start an item: its details, the stream and the tracks chosen. */
+    private struct Prepared {
+        var item: Item
+        var stream: ResolvedStream
+        var audioIndex: Int?
+        var subtitleIndex: Int?
+        var burnedIn: Bool
+    }
+
+    private struct PlaybackFailure: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
     }
 
     /** Ask the server how to play [item], and start it at [position]. */
     private func load(_ seed: Item, sourceId: String?, at position: Double, audio: Int? = nil, subtitle: Int?? = nil, keepTracks: Bool = false) async {
-        guard let client = graph.auth.client else {
-            phase = .failed("You're not signed in.")
-            return
-        }
         let mySession = session
-        var item = seed
-        // The page may have passed a thin copy; playback needs the sources, chapters and trickplay.
-        if item.mediaSources == nil || item.chapters == nil {
-            if let full = try? await client.item(seed.id) { item = full }
+        var tracks: (audio: Int?, subtitle: Int?)?
+        if keepTracks || audio != nil || subtitle != nil {
+            tracks = (audio ?? audioIndex, subtitle ?? subtitleIndex)
         }
-        guard mySession == session else { return }
-        self.item = item
-        trickplay = TrickplayThumbnails(item: item, mediaSourceId: sourceId ?? item.primarySource?.id)
-
-        let settings = graph.settings.settings
-        let chosen = item.mediaSources?.first { $0.id == sourceId } ?? item.primarySource
-        if !keepTracks, let chosen {
-            audioIndex = audio ?? StreamResolver.audioIndex(chosen, language: settings.audioLanguage.isEmpty ? graph.auth.user?.configuration?.audioLanguagePreference : settings.audioLanguage)
-            let audioLanguage = chosen.streams.first { $0.index == audioIndex }?.language
-            subtitleIndex = StreamResolver.subtitleIndex(
-                chosen,
-                mode: settings.subtitleMode,
-                language: settings.subtitleLanguage.isEmpty ? graph.auth.user?.configuration?.subtitleLanguagePreference : settings.subtitleLanguage,
-                audioLanguage: audioLanguage
-            )
-        }
-        if let audio { audioIndex = audio }
-        if let subtitle { subtitleIndex = subtitle }
-        let subtitleStream = chosen?.streams.first { $0.index == subtitleIndex }
-        burnedIn = subtitleStream?.isImageSubtitle == true
-
         do {
-            let maxBitrate = maxBitrateOverride ?? graph.maxBitrate
-            var allowDirect = settings.directPlay && !burnedIn && !triedWithoutDirectPlay
-            if let override = maxBitrateOverride, let bitrate = chosen?.bitrate, bitrate > override { allowDirect = false }
-            if let chosen, !StreamResolver.directPlayIsSafe(chosen) { allowDirect = false }
-            var response = try await client.playbackInfo(item.id, request(item: item, sourceId: chosen?.id, maxBitrate: maxBitrate, position: position, allowDirect: allowDirect))
+            let prepared = try await prepare(
+                seed,
+                sourceId: sourceId,
+                at: position,
+                tracks: tracks,
+                allowDirectPlay: !triedWithoutDirectPlay,
+                maxBitrate: maxBitrateOverride ?? graph.maxBitrate,
+                capped: maxBitrateOverride != nil
+            )
             guard mySession == session else { return }
-            if let error = response.errorCode {
-                phase = .failed(Self.describe(playbackError: error))
-                return
-            }
-            var resolved = StreamResolver.resolve(response, itemId: item.id, sourceId: chosen?.id, client: client)
-            if resolved == nil, allowDirect {
-                response = try await client.playbackInfo(item.id, request(item: item, sourceId: chosen?.id, maxBitrate: maxBitrate, position: position, allowDirect: false))
-                resolved = StreamResolver.resolve(response, itemId: item.id, sourceId: chosen?.id, client: client)
-            }
-            guard mySession == session else { return }
-            guard let resolved else {
-                phase = .failed("The server can't play this on an iPhone. It may need its transcoding settings checked.")
-                return
-            }
-            stream = resolved
-            // Track choices the server made, where Kinema left them to it.
-            if audioIndex == nil { audioIndex = resolved.source.defaultAudioStreamIndex }
-            let playerItem = AVPlayerItem(asset: AVURLAsset(url: resolved.url))
-            start(playerItem, at: position)
-            await loadSubtitles()
-            if offline == nil {
-                Task { await loadSegments(item.id) }
-                loadEpisodesAround(item)
-            }
+            await apply(prepared, at: position, asset: nil)
         } catch {
             guard mySession == session else { return }
-            phase = .failed(JellyfinError.from(error).localizedDescription)
+            phase = .failed((error as? PlaybackFailure)?.message ?? JellyfinError.from(error).localizedDescription)
         }
     }
 
-    private func request(item: Item, sourceId: String?, maxBitrate: Int, position: Double, allowDirect: Bool) -> PlaybackInfoRequest {
-        PlaybackInfoRequest(
-            userId: graph.auth.client?.userId ?? "",
-            maxStreamingBitrate: maxBitrate,
-            startTimeTicks: Ticks.from(position),
-            audioStreamIndex: audioIndex,
-            subtitleStreamIndex: burnedIn ? subtitleIndex : -1,
-            mediaSourceId: sourceId,
-            deviceProfile: graph.deviceProfile(maxBitrate: maxBitrate),
-            enableDirectPlay: allowDirect,
-            enableDirectStream: true,
-            enableTranscoding: true,
-            allowVideoStreamCopy: true,
-            allowAudioStreamCopy: true,
-            autoOpenLiveStream: true,
-            alwaysBurnInSubtitleWhenTranscoding: false
-        )
+    /**
+     * Work out how to play [seed]: fetch its details if the page passed a thin
+     * copy, choose the tracks (unless [tracks] says), and ask the server for
+     * a stream. Changes nothing, so the next episode can be prepared too.
+     */
+    private func prepare(_ seed: Item, sourceId: String?, at position: Double, tracks: (audio: Int?, subtitle: Int?)?, allowDirectPlay: Bool, maxBitrate: Int, capped: Bool) async throws -> Prepared {
+        guard let client = graph.auth.client else { throw PlaybackFailure(message: "You're not signed in.") }
+        var item = seed
+        // Playback needs the sources, chapters and trickplay.
+        if item.mediaSources == nil || item.chapters == nil {
+            if let full = try? await client.item(seed.id) { item = full }
+        }
+        let settings = graph.settings.settings
+        let chosen = item.mediaSources?.first { $0.id == sourceId } ?? item.primarySource
+        var audio: Int?
+        var subtitle: Int?
+        if let tracks {
+            audio = tracks.audio
+            subtitle = tracks.subtitle
+        } else if let chosen {
+            audio = StreamResolver.audioIndex(chosen, language: settings.audioLanguage.isEmpty ? graph.auth.user?.configuration?.audioLanguagePreference : settings.audioLanguage)
+            let audioLanguage = chosen.streams.first { $0.index == audio }?.language
+            subtitle = StreamResolver.subtitleIndex(
+                chosen,
+                mode: settings.subtitleMode,
+                language: settings.subtitleLanguage.isEmpty ? graph.auth.user?.configuration?.subtitleLanguagePreference : settings.subtitleLanguage,
+                audioLanguage: audioLanguage,
+                prefer: settings.subtitleSource,
+                embedded: settings.loadEmbeddedSubtitles
+            )
+        }
+        let burnedIn = chosen?.streams.first { $0.index == subtitle }?.isImageSubtitle == true
+        var allowDirect = allowDirectPlay && settings.directPlay && !burnedIn
+        if capped, let bitrate = chosen?.bitrate, bitrate > maxBitrate { allowDirect = false }
+        if let chosen, !StreamResolver.directPlayIsSafe(chosen) { allowDirect = false }
+
+        func request(direct: Bool) -> PlaybackInfoRequest {
+            PlaybackInfoRequest(
+                userId: client.userId ?? "",
+                maxStreamingBitrate: maxBitrate,
+                startTimeTicks: Ticks.from(position),
+                audioStreamIndex: audio,
+                subtitleStreamIndex: burnedIn ? subtitle : -1,
+                mediaSourceId: chosen?.id,
+                deviceProfile: graph.deviceProfile(maxBitrate: maxBitrate),
+                enableDirectPlay: direct,
+                enableDirectStream: true,
+                enableTranscoding: true,
+                allowVideoStreamCopy: true,
+                allowAudioStreamCopy: true,
+                autoOpenLiveStream: true,
+                alwaysBurnInSubtitleWhenTranscoding: false
+            )
+        }
+        var response = try await client.playbackInfo(item.id, request(direct: allowDirect))
+        if let code = response.errorCode { throw PlaybackFailure(message: Self.describe(playbackError: code)) }
+        var resolved = StreamResolver.resolve(response, itemId: item.id, sourceId: chosen?.id, client: client)
+        if resolved == nil, allowDirect {
+            response = try await client.playbackInfo(item.id, request(direct: false))
+            resolved = StreamResolver.resolve(response, itemId: item.id, sourceId: chosen?.id, client: client)
+        }
+        guard let resolved else {
+            throw PlaybackFailure(message: "The server can't play this on an iPhone. It may need its transcoding settings checked.")
+        }
+        // Track choices the server made, where Kinema left them to it.
+        return Prepared(item: item, stream: resolved, audioIndex: audio ?? resolved.source.defaultAudioStreamIndex, subtitleIndex: subtitle, burnedIn: burnedIn)
+    }
+
+    /** Start a prepared item at [position] (with the asset loaded ahead, when it was preloaded). */
+    private func apply(_ prepared: Prepared, at position: Double, asset: AVURLAsset?) async {
+        item = prepared.item
+        trickplay = TrickplayThumbnails(item: prepared.item, mediaSourceId: prepared.stream.source.id)
+        stream = prepared.stream
+        audioIndex = prepared.audioIndex
+        subtitleIndex = prepared.subtitleIndex
+        burnedIn = prepared.burnedIn
+        start(AVPlayerItem(asset: asset ?? AVURLAsset(url: prepared.stream.url)), at: position)
+        await loadSubtitles()
+        if offline == nil {
+            let id = prepared.item.id
+            Task { await loadSegments(id) }
+            loadEpisodesAround(prepared.item)
+        }
     }
 
     private static func describe(playbackError code: String) -> String {
@@ -328,7 +377,13 @@ final class PlayerModel: NSObject {
         itemObservations.forEach { $0.invalidate() }
         itemObservations = []
         readyHandled = false
-        playerItem.preferredForwardBufferDuration = 0
+        // The maximum cache, as seconds of this stream to load ahead.
+        let bitrate: Int? = {
+            guard let stream else { return nil }
+            if stream.method == .directPlay { return stream.source.bitrate }
+            return min(stream.source.bitrate ?? Int.max, maxBitrateOverride ?? graph.maxBitrate)
+        }()
+        playerItem.preferredForwardBufferDuration = graph.settings.settings.forwardBuffer(bitrate: bitrate)
         player.replaceCurrentItem(with: playerItem)
         surface.playerLayer.opacity = position > 1 ? 0 : 1
         let mySession = session
@@ -447,6 +502,8 @@ final class PlayerModel: NSObject {
     /** Stop and close the player. */
     func close() {
         stopSession(report: true)
+        discardPreload()
+        graph.downloads.pauseForPlayback(false)
         if pip?.isPictureInPictureActive == true { pip?.stopPictureInPicture() }
         player.replaceCurrentItem(with: nil)
         item = nil
@@ -527,6 +584,7 @@ final class PlayerModel: NSObject {
         speed = next
         player.defaultRate = Float(next)
         if isPlaying, !holding { player.rate = Float(next) }
+        if graph.settings.settings.rememberSpeed { graph.settings.update { $0.lastSpeed = next } }
     }
 
     /** Hold the screen: faster until let go. */
@@ -568,6 +626,13 @@ final class PlayerModel: NSObject {
     func toggleOrientation() {
         portrait.toggle()
         AppDelegate.lock(portrait ? .portrait : .landscape)
+        if !portrait && !graph.settings.settings.landscapeByDefault {
+            // Back to turning with the phone, once it's sideways.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                if !self.portrait { AppDelegate.lock(self.playerOrientation) }
+            }
+        }
     }
 
     func setQuality(_ bitrate: Int?) {
@@ -588,8 +653,10 @@ final class PlayerModel: NSObject {
 
     func scheduleHide() {
         hideTask?.cancel()
+        let delay = graph.settings.settings.controlsHideDelay
+        guard delay > 0 else { return }
         hideTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
             guard !Task.isCancelled, let self, self.isPlaying, self.panel == nil, self.clock.scrubbing == nil else { return }
             withAnimation(.easeOut(duration: 0.3)) { self.controlsVisible = false }
         }
@@ -708,8 +775,41 @@ final class PlayerModel: NSObject {
     private func loadSegments(_ id: String) async {
         guard let client = graph.auth.client else { return }
         let found = await client.mediaSegments(id)
-        if item?.id == id { segments = found }
+        if item?.id == id { segments = withMarkers(found) }
     }
+
+    /** The server's segments, plus the intro and credits marked by hand for this series where it has none. */
+    private func withMarkers(_ found: [MediaSegment]) -> [MediaSegment] {
+        guard let seriesId = item?.seriesId, let markers = graph.markers.markers(seriesId) else { return found }
+        let duration = clock.duration > 0 ? clock.duration : (item?.runtime ?? 0)
+        let have = Set(found.map(\.type))
+        let added = markers.segments(duration: duration).filter { !have.contains($0.type) }
+        return (found + added).sorted { $0.startTicks < $1.startTicks }
+    }
+
+    /** Mark where this series' intro ends (or its credits start), here and now. */
+    func markIntroEnd() {
+        guard let seriesId = item?.seriesId else { return }
+        graph.markers.update(seriesId) { $0.introEnd = clock.position }
+        segments = withMarkers(segments.filter { !$0.id.hasPrefix("marker-") })
+        graph.messages.show("Intro ends at \(Format.clock(clock.position)) in every episode", .success)
+    }
+
+    func markCreditsStart() {
+        guard let seriesId = item?.seriesId, clock.duration > 0 else { return }
+        graph.markers.update(seriesId) { $0.creditsFromEnd = clock.duration - clock.position }
+        segments = withMarkers(segments.filter { !$0.id.hasPrefix("marker-") })
+        graph.messages.show("Credits start \(Format.clock(clock.duration - clock.position)) before the end of every episode", .success)
+    }
+
+    func clearMarkers() {
+        guard let seriesId = item?.seriesId else { return }
+        graph.markers.clear(seriesId)
+        segments = segments.filter { !$0.id.hasPrefix("marker-") }
+        graph.messages.show("Marks cleared")
+    }
+
+    var hasMarkers: Bool { item?.seriesId.flatMap { graph.markers.markers($0) } != nil }
 
     private func updateSegment(at time: Double) {
         let settings = graph.settings.settings
@@ -841,11 +941,81 @@ final class PlayerModel: NSObject {
         guard let next = nextEpisode else { return }
         countdownTask?.cancel()
         let library = graph.library
-        if let offline, let record = graph.downloads.record(next.id), record.isDone, offline.id != next.id {
+        if let record = graph.downloads.record(next.id), record.isDone {
             openOffline(record)
             return
         }
+        // Prepared ahead: start straight away, with the asset already loading.
+        if let ready = preloaded, ready.id == next.id {
+            preloaded = nil
+            begin(ready.prepared.item)
+            startPosition = Ticks.seconds(library.resumeTicks(next))
+            let position = startPosition
+            loadTask = Task { await self.apply(ready.prepared, at: position, asset: ready.asset) }
+            return
+        }
         open(library.current(next), startTicks: library.resumeTicks(next), mediaSourceId: nil)
+    }
+
+    // ---------------------------------------------------------- preloading --
+
+    /**
+     * Near the end of an episode (the last fifth, or three minutes), prepare
+     * the next one: ask the server for its stream, load the asset, and for a
+     * stream the server makes, ask for its first pieces so it starts making
+     * them. Then Up Next starts it at once.
+     */
+    private func maybePreload(at time: Double) {
+        guard graph.settings.settings.preloadNextEpisode, offline == nil, preloaded == nil, preloadTask == nil,
+              let next = nextEpisode, clock.duration > 60, graph.downloads.record(next.id)?.isDone != true
+        else { return }
+        guard time >= max(clock.duration * 0.8, clock.duration - 180) else { return }
+        let mySession = session
+        let library = graph.library
+        let start = Ticks.seconds(library.resumeTicks(next))
+        let seed = library.current(next)
+        preloadTask = Task {
+            defer { if mySession == self.session { self.preloadTask = nil } }
+            guard let prepared = try? await self.prepare(seed, sourceId: nil, at: start, tracks: nil, allowDirectPlay: true, maxBitrate: self.graph.maxBitrate, capped: false),
+                  mySession == self.session
+            else { return }
+            let asset = AVURLAsset(url: prepared.stream.url)
+            _ = try? await asset.load(.isPlayable, .duration)
+            if prepared.stream.isHLS { await Self.warm(prepared.stream.url) }
+            guard mySession == self.session else { return }
+            self.preloaded = (next.id, prepared, asset)
+        }
+    }
+
+    private func discardPreload() {
+        preloadTask?.cancel()
+        preloadTask = nil
+        preloaded = nil
+    }
+
+    /** Ask for an HLS stream's first pieces, so the server starts converting it before it's needed. */
+    private static func warm(_ master: URL) async {
+        func lines(_ url: URL) async -> [String] {
+            guard let (data, _) = try? await URLSession.shared.data(from: url) else { return [] }
+            return String(decoding: data, as: UTF8.self).components(separatedBy: .newlines)
+        }
+        let masterLines = await lines(master)
+        guard let variantLine = masterLines.first(where: { !$0.hasPrefix("#") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+              let variant = URL(string: variantLine, relativeTo: master)?.absoluteURL
+        else { return }
+        let variantLines = await lines(variant)
+        var wanted: [URL] = []
+        if let map = variantLines.first(where: { $0.hasPrefix("#EXT-X-MAP:") }),
+           let range = map.range(of: "URI=\""),
+           let end = map[range.upperBound...].firstIndex(of: "\""),
+           let url = URL(string: String(map[range.upperBound..<end]), relativeTo: variant)?.absoluteURL {
+            wanted.append(url)
+        }
+        if let first = variantLines.first(where: { !$0.hasPrefix("#") && !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+           let url = URL(string: first, relativeTo: variant)?.absoluteURL {
+            wanted.append(url)
+        }
+        for url in wanted { _ = try? await URLSession.shared.data(from: url) }
     }
 
     func playPrevious() {
@@ -985,6 +1155,7 @@ final class PlayerModel: NSObject {
         }
         updateSegment(at: seconds)
         updateUpNext(at: seconds)
+        maybePreload(at: seconds)
         ticks += 1
         if ticks % 20 == 0 { NowPlaying.update(self, artwork: nowPlayingArtwork) }
     }
@@ -1052,32 +1223,78 @@ final class PlayerModel: NSObject {
 
     // ------------------------------------------------------- screenshot --
 
-    /** Save the frame on screen to Photos. */
-    func screenshot() {
-        guard let playerItem = player.currentItem else { return }
+    /** The frame on screen now, as a picture. */
+    private func currentFrame(maxWidth: Int? = nil) -> CGImage? {
+        guard let playerItem = player.currentItem else { return nil }
         if videoOutput == nil {
             let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
             playerItem.add(output)
             videoOutput = output
         }
-        guard let output = videoOutput else { return }
+        guard let output = videoOutput,
+              let buffer = output.copyPixelBuffer(forItemTime: playerItem.currentTime(), itemTimeForDisplay: nil)
+        else { return nil }
+        var image = CIImage(cvPixelBuffer: buffer)
+        if let maxWidth, image.extent.width > CGFloat(maxWidth) {
+            let scale = CGFloat(maxWidth) / image.extent.width
+            image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        }
+        return Self.ciContext.createCGImage(image, from: image.extent)
+    }
+
+    private static let ciContext = CIContext()
+
+    /** Save the frame on screen to Photos, in the format chosen in Settings. */
+    func screenshot() {
         Task {
             // A freshly added output needs a moment before it hands out frames.
             for _ in 0..<15 {
-                let time = playerItem.currentTime()
-                if let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
-                    let image = CIImage(cvPixelBuffer: buffer)
-                    let context = CIContext()
-                    if let cg = context.createCGImage(image, from: image.extent) {
-                        UIImageWriteToSavedPhotosAlbum(UIImage(cgImage: cg), nil, nil, nil)
+                if let frame = currentFrame() {
+                    let format = graph.settings.settings.screenshotFormat
+                    guard let data = PhotoSaver.encode(frame, format: format) else { break }
+                    if await PhotoSaver.save(data, type: format.type) {
                         Haptics.success()
                         graph.messages.show("Saved to Photos", .success)
-                        return
+                    } else {
+                        graph.messages.error("Kinema isn't allowed to add to Photos. Allow it in Settings → Kinema → Photos.")
                     }
+                    return
                 }
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
             graph.messages.error("Couldn't capture this frame.")
+        }
+    }
+
+    /** Start recording a GIF of what's playing, or stop and save it. Stops by itself after ten seconds. */
+    func toggleGIF() {
+        if recordingGIF {
+            recordingGIF = false
+            return
+        }
+        let settings = graph.settings.settings
+        let fps = max(5, min(30, settings.gifFrameRate))
+        let width = settings.gifWidth
+        recordingGIF = true
+        Haptics.tap()
+        gifTask = Task {
+            var frames: [CGImage] = []
+            let limit = fps * 10
+            while recordingGIF && frames.count < limit && !Task.isCancelled {
+                if isPlaying, let frame = currentFrame(maxWidth: width) { frames.append(frame) }
+                try? await Task.sleep(nanoseconds: UInt64(1_000_000_000 / fps))
+            }
+            recordingGIF = false
+            guard frames.count > 2, let data = PhotoSaver.gif(frames, fps: fps) else {
+                graph.messages.show("Too short to save: let it play while recording.")
+                return
+            }
+            if await PhotoSaver.save(data, type: .gif) {
+                Haptics.success()
+                graph.messages.show("GIF saved to Photos", .success)
+            } else {
+                graph.messages.error("Kinema isn't allowed to add to Photos. Allow it in Settings → Kinema → Photos.")
+            }
         }
     }
 
@@ -1158,7 +1375,7 @@ extension PlayerModel: AVPictureInPictureControllerDelegate {
         Task { @MainActor in
             self.restoringFromPiP = true
             self.graph.ui.playerOpen = true
-            AppDelegate.lock(self.portrait ? .portrait : .landscape)
+            AppDelegate.lock(self.playerOrientation)
             try? await Task.sleep(nanoseconds: 450_000_000)
             completionHandler(true)
         }

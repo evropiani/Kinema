@@ -492,7 +492,11 @@ private struct OnlineSubtitlePanel: View {
             HStack(spacing: 10) {
                 Menu {
                     ForEach(Languages.common, id: \.0) { pair in
-                        Button(pair.1) { language = pair.0 }
+                        Button(pair.1) {
+                            language = pair.0
+                            // Remembered for next time, as VidHub does.
+                            AppGraph.shared.settings.update { $0.onlineSubtitleLanguage = pair.0 }
+                        }
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -552,7 +556,8 @@ private struct OnlineSubtitlePanel: View {
         .onAppear {
             if language.isEmpty {
                 let settings = AppGraph.shared.settings.settings
-                let preferred = settings.subtitleLanguage.isEmpty ? (AppGraph.shared.auth.user?.configuration?.subtitleLanguagePreference ?? "") : settings.subtitleLanguage
+                let fallback = settings.subtitleLanguage.isEmpty ? (AppGraph.shared.auth.user?.configuration?.subtitleLanguagePreference ?? "") : settings.subtitleLanguage
+                let preferred = settings.onlineSubtitleLanguage.isEmpty ? fallback : settings.onlineSubtitleLanguage
                 language = Languages.normalize(preferred) ?? Languages.normalize(Locale.current.language.languageCode?.identifier) ?? "eng"
             }
         }

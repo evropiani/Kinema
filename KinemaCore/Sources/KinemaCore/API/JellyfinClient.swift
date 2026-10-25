@@ -505,6 +505,26 @@ final class JellyfinClient: @unchecked Sendable {
         return try await get(QueryResult<Item>.self, "/Persons", query: q).items
     }
 
+    /** How many films, shows and episodes the user can see. */
+    func itemCounts() async throws -> ItemCounts {
+        try await get(ItemCounts.self, "/Items/Counts", query: user)
+    }
+
+    /** Ask the server to scan all its libraries for new and changed files (administrators only). */
+    func scanLibraries() async throws {
+        try await data("POST", "/Library/Refresh")
+    }
+
+    /** Ask the server to fetch an item's details and pictures again (administrators only). */
+    func refreshMetadata(_ id: String) async throws {
+        try await data("POST", "/Items/\(id)/Refresh", query: [
+            URLQueryItem(name: "metadataRefreshMode", value: "FullRefresh"),
+            URLQueryItem(name: "imageRefreshMode", value: "FullRefresh"),
+            URLQueryItem(name: "replaceAllMetadata", value: "false"),
+            URLQueryItem(name: "replaceAllImages", value: "false"),
+        ])
+    }
+
     // --------------------------------------------------------------- user data --
 
     func setPlayed(_ id: String, _ played: Bool) async throws -> UserData {

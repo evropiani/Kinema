@@ -154,13 +154,14 @@ final class DownloadManager: NSObject {
         pump()
     }
 
-    /** Start queued downloads, a few at a time. */
+    /** Start queued downloads, as many at once as Settings → Downloads allows. */
     private func pump() {
+        let limit = max(1, min(5, graph.settings.settings.concurrentDownloads))
         let running = all.filter { $0.state == .downloading }.count
-        guard running < 2 else { return }
+        guard running < limit, !pausedForPlayback else { return }
         guard graph.network.online else { return }
         if graph.network.metered && !graph.settings.settings.downloadOnCellular { return }
-        let queued = all.filter { $0.state == .queued && $0.profileId == graph.auth.activeId }.prefix(2 - running)
+        let queued = all.filter { $0.state == .queued && $0.profileId == graph.auth.activeId }.prefix(limit - running)
         for record in queued {
             update(record.id) { $0.state = .downloading; $0.error = nil }
             Task { await begin(record.id) }
@@ -298,6 +299,22 @@ final class DownloadManager: NSObject {
         save()
         reload()
         pump()
+    }
+
+    @ObservationIgnored private var pausedForPlayback = false
+
+    /** Hold downloads while a video plays (Settings → Downloads), and carry on after. */
+    func pauseForPlayback(_ paused: Bool) {
+        guard paused != pausedForPlayback, started else { return }
+        pausedForPlayback = paused
+        for session in [fileSession as URLSession?, hlsSession as URLSession?].compactMap({ $0 }) {
+            session.getAllTasks { tasks in
+                for task in tasks {
+                    if paused { task.suspend() } else { task.resume() }
+                }
+            }
+        }
+        if !paused { pump() }
     }
 
     func retry(_ id: String) {

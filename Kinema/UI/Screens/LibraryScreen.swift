@@ -60,8 +60,9 @@ enum LibraryFilter: String, CaseIterable, Hashable {
 }
 
 /**
- * The Library tab: the user's libraries as tabs along the top, and the one
- * chosen as a grid of posters below.
+ * The Library tab: the user's libraries as tabs along the top, and below
+ * them one page per library, swiped between sideways (or chosen with the
+ * tabs).
  */
 struct LibraryScreen: View {
     @Environment(\.kinema) private var theme
@@ -72,23 +73,42 @@ struct LibraryScreen: View {
 
     var body: some View {
         let graph = AppGraph.shared
-        let views = graph.library.videoViews.filter { $0.collectionType != "boxsets" }
-        var tabs = views
+        let hidden = Set(theme.settings.hiddenLibraries)
+        var tabs = graph.library.videoViews.filter { $0.collectionType != "boxsets" && !hidden.contains($0.id) }
         tabs.append(Item(id: Self.collectionsId, name: "Collections", type: "UserView"))
         tabs.append(Item(id: Self.favoritesId, name: "Favorites", type: "UserView"))
         let current = tabs.first { $0.id == selected } ?? tabs.first
-        return Group {
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("Library")
+                .font(KFont.display)
+                .foregroundStyle(theme.colors.ink)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 10)
             if let current, graph.library.viewsLoaded {
-                LibraryGrid(view: pseudo(current), header: AnyView(tabBar(tabs, current: current)))
-                    .id(current.id)
+                tabBar(tabs, current: current)
+                TabView(selection: Binding(get: { current.id }, set: { id in
+                    if id != selected {
+                        Haptics.select()
+                        selected = id
+                    }
+                })) {
+                    ForEach(tabs) { tab in
+                        LibraryGrid(view: pseudo(tab), standalone: false)
+                            .tag(tab.id)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
             } else if graph.library.viewsLoaded {
                 EmptyState(icon: "square.stack", title: "No libraries", message: "This account can't see any film or show libraries on the server.")
-                    .kinemaScreen()
+                Spacer()
             } else {
-                LoadingView().kinemaScreen()
+                LoadingView()
+                Spacer()
             }
         }
-        .navigationTitle("Library")
+        .toolbar(.hidden, for: .navigationBar)
+        .kinemaScreen()
         .task(id: graph.auth.generation) { await graph.library.loadViews() }
     }
 
@@ -128,9 +148,13 @@ struct LibraryScreen: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 2)
+                .animation(theme.spring, value: current.id)
             }
             .overlay(alignment: .bottom) { Rule() }
             .onAppear { reader.scrollTo(current.id) }
+            .onChange(of: current.id) { _, id in
+                withAnimation(theme.ease) { reader.scrollTo(id, anchor: .center) }
+            }
         }
     }
 }
@@ -140,7 +164,7 @@ struct LibraryGridScreen: View {
     let view: Item
 
     var body: some View {
-        LibraryGrid(view: view, header: nil)
+        LibraryGrid(view: view)
             .navigationTitle(view.name)
             .navigationBarTitleDisplayMode(.large)
     }
@@ -157,7 +181,7 @@ struct GenreScreen: View {
         view.collectionType = "kinema.genre"
         view.genres = [name]
         view.tags = types
-        return LibraryGrid(view: view, header: nil)
+        return LibraryGrid(view: view)
             .navigationTitle(name)
             .navigationBarTitleDisplayMode(.large)
     }
@@ -170,14 +194,15 @@ struct GenreScreen: View {
 struct LibraryGrid: View {
     @Environment(\.kinema) private var theme
     let view: Item
-    var header: AnyView?
+    /** On a page of its own, with its own background; inside the Library tab's pages, without. */
+    var standalone = true
 
     @State private var items: [Item] = []
     @State private var total: Int?
     @State private var loading = false
     @State private var failed: String?
-    @State private var sort: LibrarySort = .name
-    @State private var descending = false
+    @State private var sort: LibrarySort
+    @State private var descending: Bool
     @State private var filter: LibraryFilter = .all
     @State private var genres: Set<String> = []
     @State private var years: Set<Int> = []
@@ -186,6 +211,16 @@ struct LibraryGrid: View {
     @State private var availableGenres: [String] = []
     @State private var availableYears: [Int] = []
     @State private var generation = 0
+
+    init(view: Item, standalone: Bool = true) {
+        self.view = view
+        self.standalone = standalone
+        // Opens in the order chosen in Settings → General.
+        let settings = AppGraph.shared.settings.settings
+        let sort = view.collectionType == "kinema.favorites" ? .name : (LibrarySort(rawValue: settings.defaultSort) ?? .name)
+        _sort = State(initialValue: sort)
+        _descending = State(initialValue: view.collectionType == "kinema.favorites" ? false : settings.defaultSortDescending)
+    }
 
     private static let pageSize = 60
     private static let letters = ["#"] + "ABCDEFGHIJKLMNOPQRSTUVWXYZ".map { String($0) }
@@ -199,7 +234,6 @@ struct LibraryGrid: View {
         ScrollViewReader { reader in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
-                    if let header { header }
                     FilterField(text: $text, placeholder: "Filter \(noun(plural: true))")
                         .id("top")
                     controls
@@ -232,7 +266,7 @@ struct LibraryGrid: View {
             .scrollDismissesKeyboard(.immediately)
             .refreshable { reload() }
         }
-        .kinemaScreen()
+        .modifier(StandaloneScreen(standalone: standalone))
         .task(id: queryKey) {
             // A short pause while typing, so each letter isn't a request.
             if !text.isEmpty { try? await Task.sleep(nanoseconds: 300_000_000) }
@@ -240,18 +274,9 @@ struct LibraryGrid: View {
             await load(reset: true)
         }
         .task(id: view.id) { await loadFilterOptions() }
-        .onAppear {
-            if items.isEmpty, view.collectionType == "kinema.favorites" { sort = .name }
-        }
     }
 
-    private var minWidth: CGFloat {
-        switch theme.settings.posterSize {
-        case .small: return 78
-        case .medium: return 104
-        case .large: return 150
-        }
-    }
+    private var minWidth: CGFloat { theme.posterGridMinimum }
 
     private var activeFilters: Bool {
         filter != .all || !genres.isEmpty || !years.isEmpty || letter != nil || !text.isEmpty
@@ -500,6 +525,19 @@ struct LibraryGrid: View {
     }
 }
 
+/** Kinema's background, unless the grid sits on a page that has one already. */
+private struct StandaloneScreen: ViewModifier {
+    let standalone: Bool
+
+    func body(content: Content) -> some View {
+        if standalone {
+            content.kinemaScreen()
+        } else {
+            content
+        }
+    }
+}
+
 /** A home shelf in full: everything in Continue Watching, Next Up or Favorites. */
 struct ShelfScreen: View {
     @Environment(\.kinema) private var theme
@@ -519,7 +557,7 @@ struct ShelfScreen: View {
                 }
                 .padding(16)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 170), spacing: 12, alignment: .top)], spacing: 18) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.posterGridMinimum, maximum: theme.posterGridMinimum * 1.6), spacing: 12, alignment: .top)], spacing: 18) {
                     ForEach(items) { PosterCard(item: $0) }
                 }
                 .padding(16)

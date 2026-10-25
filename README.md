@@ -28,10 +28,11 @@ for free.
   trailer. Shows list their seasons and episodes; every page has cast &
   crew, extras, similar titles, details and the file's tracks. Pick another
   version when a title has several.
-- **Libraries** as posters, with sorting (name, date added, release date,
-  rating, length, last watched, random), filters (unwatched, watched, in
-  progress, favourites, genres, years), an A–Z jump down the side and a
-  quick filter field. Collections and Favorites have tabs of their own.
+- **Libraries** as posters, swiped through left and right, with sorting
+  (name, date added, release date, rating, length, last watched, random),
+  filters (unwatched, watched, in progress, favourites, genres, years), an
+  A–Z jump down the side and a quick filter field. Collections and
+  Favorites have pages of their own.
 - **Search** across films, shows, episodes, people and collections as you
   type, with recent searches and genres to browse.
 - **A player made for watching.** Tap to show the controls, double-tap
@@ -42,7 +43,10 @@ for free.
   4×, chapters, **Skip Intro**, **Skip Credits** and **Up Next** with a
   countdown, previous and next episode, an episode list, screen lock,
   fit / fill / stretch, Picture in Picture, AirPlay, lock-screen controls,
-  playback info (method, codecs, bitrates, dropped frames) and screenshots.
+  playback info (method, codecs, bitrates, dropped frames), screenshots
+  (JPEG, PNG or HEIC) and **GIF recording**. The next episode is preloaded
+  near the end, and where the server knows no intro or credits you can mark
+  them once for the whole show.
 - **Subtitles drawn by Kinema**, in your style: size, colour, outline,
   background, brightness, font and position, a **second subtitle track** at
   the same time, a delay to fix out-of-sync files, and a **search for
@@ -55,8 +59,14 @@ for free.
   when needed. HEVC, HDR10, HLG and Dolby Vision play where the iPhone can.
   Watching is reported to the server, so progress follows you everywhere.
 - **Downloads** for watching offline, as the original file or a smaller
-  copy made by the server, with their subtitles and artwork. What you watch
-  offline is sent to the server once you're back online.
+  copy made by the server, with their subtitles and artwork, several at a
+  time, with a floating progress strip. What you watch offline is sent to
+  the server once you're back online.
+- **Settings for everything**, modelled on VidHub's: hide spoilers, default
+  sorting, a prompt before streaming on mobile data, the maximum cache,
+  decoding switches, when the controls hide, landscape by default, seek
+  sensitivity, subtitle rules, GIF frame rate and size, concurrent
+  downloads, and for admins library scans and metadata refreshes.
 - **Several servers and users**, sign-in with a password or **Quick
   Connect**, a list of the server's users to tap, and Jellyfin's demo server
   to try without one.

@@ -50,8 +50,8 @@ struct SearchScreen: View {
 
     @ViewBuilder
     private var results: some View {
-        MediaShelf(title: "Movies", icon: "film", items: movies, cardWidth: 118) { PosterCard(item: $0) }
-        MediaShelf(title: "Shows", icon: "tv", items: shows, cardWidth: 118) { PosterCard(item: $0) }
+        MediaShelf(title: "Movies", icon: "film", items: movies, cardWidth: theme.posterWidth) { PosterCard(item: $0) }
+        MediaShelf(title: "Shows", icon: "tv", items: shows, cardWidth: theme.posterWidth) { PosterCard(item: $0) }
         MediaShelf(title: "Episodes", icon: "list.number", items: episodes, cardWidth: 240) { LandscapeCard(item: $0, plays: false) }
         if !people.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
@@ -67,7 +67,7 @@ struct SearchScreen: View {
             }
             .padding(.top, 10)
         }
-        MediaShelf(title: "Collections", icon: "square.stack.fill", items: collections, cardWidth: 118) { PosterCard(item: $0) }
+        MediaShelf(title: "Collections", icon: "square.stack.fill", items: collections, cardWidth: theme.posterWidth) { PosterCard(item: $0) }
     }
 
     private var browse: some View {
