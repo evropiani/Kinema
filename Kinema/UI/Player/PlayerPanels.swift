@@ -47,7 +47,7 @@ struct PanelHost: View {
                 }
                 .foregroundStyle(.white)
                 .frame(width: wide ? min(400, proxy.size.width * 0.46) : proxy.size.width, height: wide ? proxy.size.height : min(560, proxy.size.height * 0.62))
-                .background(.ultraThinMaterial.opacity(0.95))
+                .background(.ultraThinMaterial)
                 .background(Color.black.opacity(0.55))
                 .clipShape(RoundedRectangle(cornerRadius: wide ? 0 : 26, style: .continuous))
                 .environment(\.colorScheme, .dark)
