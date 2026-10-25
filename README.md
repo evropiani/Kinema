@@ -9,6 +9,14 @@ and played in a player made for watching. It has the look and feel of
 pages) and the features you'd expect from the best paid video players,
 for free.
 
+<p>
+  <img src="docs/screenshots/1-home.jpg" alt="Home" width="19%">
+  <img src="docs/screenshots/2-movie.jpg" alt="A film's page" width="19%">
+  <img src="docs/screenshots/3-series.jpg" alt="A show's page" width="19%">
+  <img src="docs/screenshots/4-library.jpg" alt="Library" width="19%">
+</p>
+<img src="docs/screenshots/5-player.jpg" alt="The player" width="78%">
+
 ## Features
 
 - **Home** with a big carousel of what's new, **Continue Watching**,
