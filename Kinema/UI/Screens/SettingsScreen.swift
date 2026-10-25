@@ -317,16 +317,19 @@ private struct PosterSizePreview: View {
 
     var body: some View {
         let width = theme.posterWidth * 0.62
-        HStack(spacing: 8) {
-            ForEach(0..<6, id: \.self) { i in
-                RoundedRectangle(cornerRadius: theme.radii.xs, style: .continuous)
-                    .fill(LinearGradient(colors: [theme.colors.accent.opacity(0.7 - Double(i) * 0.08), theme.colors.accent.opacity(0.2)], startPoint: .top, endPoint: .bottom))
-                    .frame(width: width, height: width * 1.5)
+        let spacing: CGFloat = 8
+        GeometryReader { proxy in
+            // As many as fit across the row, like a shelf on Home.
+            let count = max(1, Int((proxy.size.width + spacing) / (width + spacing)))
+            HStack(spacing: spacing) {
+                ForEach(0..<count, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: theme.radii.xs, style: .continuous)
+                        .fill(LinearGradient(colors: [theme.colors.accent.opacity(0.7 - Double(i % 6) * 0.08), theme.colors.accent.opacity(0.2)], startPoint: .top, endPoint: .bottom))
+                        .frame(width: width, height: width * 1.5)
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: theme.posterWidth * 0.62 * 1.5, alignment: .leading)
-        .clipped()
+        .frame(height: width * 1.5)
         .animation(theme.spring, value: size)
         .accessibilityHidden(true)
     }
