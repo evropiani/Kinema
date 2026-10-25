@@ -126,16 +126,19 @@ private struct AccountsPage: View {
                                     Haptics.tap()
                                     quickConnect = true
                                 } label: {
-                                    Label("Quick Connect", systemImage: "key.fill")
-                                        .font(KFont.labelLarge)
-                                        .lineLimit(1)
-                                        .fixedSize()
-                                        .foregroundStyle(theme.colors.accent)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(Capsule().fill(theme.colors.accentSoft))
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "key.fill").font(.system(size: 13, weight: .semibold))
+                                        Text("Quick Connect").font(KFont.labelLarge).lineLimit(1)
+                                    }
+                                    .fixedSize()
+                                    .foregroundStyle(theme.colors.accent)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Capsule().fill(theme.colors.accentSoft))
+                                    .contentShape(Capsule())
                                 }
                                 .buttonStyle(.borderless)
+                                .layoutPriority(1)
                                 .accessibilityHint("Sign in another device with the code it shows")
                             }
                         } else {
