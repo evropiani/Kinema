@@ -1,0 +1,210 @@
+name: iOS
+
+on:
+  push:
+    branches: ["**", "!ci-screenshots"]
+    tags-ignore: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Tools
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Core tests
+        id: tests
+        continue-on-error: true
+        run: swift test --package-path KinemaCore 2>&1 | tee tests.log | grep -E "error:|failed|passed|Executed" ; exit ${PIPESTATUS[0]}
+        shell: bash
+
+      - name: Build (simulator, debug)
+        if: github.ref != 'refs/heads/main'
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Kinema.xcodeproj \
+            -scheme Kinema \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build.log | grep -E "error:|warning: unre|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+
+      - name: Screenshots in the simulator
+        if: github.ref != 'refs/heads/main'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          set -x
+          mkdir -p shots
+          xcrun simctl list runtimes > shots/runtimes.txt || true
+          curl -sS -m 20 "https://demo.jellyfin.org/stable/System/Info/Public" > shots/ping.txt 2>&1 || true
+          # An iPhone Pro on the newest runtime whose name contains $1.
+          pick() {
+            xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          devices = json.load(sys.stdin)['devices']
+          runtimes = sorted((k for k in devices if 'iOS-' + sys.argv[1] in k), reverse=True)
+          for runtime in runtimes:
+              phones = [d for d in devices[runtime] if d['name'].startswith('iPhone') and 'Pro' in d['name'] and 'Max' not in d['name']]
+              if phones:
+                  print(phones[0]['udid']); break
+          " "$1"
+          }
+          # shoot <runtime> <prefix> <screens...>
+          shoot() {
+            local runtime=$1 prefix=$2; shift 2
+            local UDID; UDID=$(pick "$runtime")
+            [ -n "$UDID" ] || { echo "no iOS $runtime iPhone" > "shots/${prefix}missing.txt"; return 0; }
+            xcrun simctl boot "$UDID" || true
+            xcrun simctl bootstatus "$UDID" -b
+            xcrun simctl ui "$UDID" appearance "${LOOK:-dark}" || true
+            xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3 || true
+            xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/Kinema.app
+            for screen in "$@"; do
+              # Home is the first screen that signs in, so it gets longer.
+              if [ "$screen" = "home" ]; then wait=120; else wait=60; fi
+              xcrun simctl terminate "$UDID" app.kinema.ios || true
+              DATA=$(xcrun simctl get_app_container "$UDID" app.kinema.ios data 2>/dev/null || true)
+              [ -n "$DATA" ] && rm -f "$DATA/Documents/kinema-ready-$screen"
+              SIMCTL_CHILD_KINEMA_DEMO_SERVER=https://demo.jellyfin.org/stable SIMCTL_CHILD_KINEMA_SCREEN=$screen SIMCTL_CHILD_KINEMA_LOOK=${LOOK:-dark} xcrun simctl launch "$UDID" app.kinema.ios
+              DATA=$(xcrun simctl get_app_container "$UDID" app.kinema.ios data)
+              for i in $(seq 1 $wait); do
+                [ -f "$DATA/Documents/kinema-ready-$screen" ] && break
+                sleep 1
+              done
+              cat "$DATA/Documents/kinema-ready-$screen" > "shots/$prefix$screen.txt" 2>/dev/null || echo "timed out" > "shots/$prefix$screen.txt"
+              xcrun simctl io "$UDID" screenshot "shots/$prefix$screen.png" || true
+            done
+            xcrun simctl spawn "$UDID" log show --last 20m --style compact --predicate 'process == "Kinema"' > "shots/${prefix}log.txt" 2>&1 || true
+            xcrun simctl shutdown "$UDID" || true
+          }
+          shoot 26 "" welcome server home library movie series episodes search found settings player player-controls downloads
+          shoot 18 "ios18-" home lens library movie
+          LOOK=light shoot 26 "light-" home movie
+
+      - name: Publish screenshots
+        if: always() && github.ref != 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [ -d shots ] || exit 0
+          cd shots
+          git init -q
+          git checkout -q -b ci-screenshots
+          git add .
+          git -c user.name="Kinema CI" -c user.email="ci@kinema.invalid" commit -qm "Screenshots for ${GITHUB_SHA}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-screenshots
+
+      - name: Build unsigned IPA (release)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Kinema.xcodeproj \
+            -scheme Kinema \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            | tee build.log | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" build.log
+          mkdir -p out/Payload
+          cp -R build/Build/Products/Release-iphoneos/Kinema.app out/Payload/
+          (cd out && zip -qry Kinema.ipa Payload)
+          ls -lh out/Kinema.ipa
+
+      - name: Fail when core tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            build.log
+            tests.log
+          if-no-files-found: ignore
+
+      - name: Upload IPA artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kinema-ipa
+          path: out/Kinema.ipa
+
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(grep -m1 "MARKETING_VERSION" Kinema.xcodeproj/project.pbxproj | sed -E 's/.*= ([^;]+);/\1/')
+          TAG="v${VERSION}"
+          NOTES_FILE=".github/release-notes/v${VERSION}.md"
+          if [ ! -f "$NOTES_FILE" ]; then
+            NOTES_FILE=$(mktemp)
+            printf '%s\n' \
+              "Kinema ${VERSION}." \
+              "" \
+              "## Install" \
+              "" \
+              "Download **Kinema.ipa** below and install it with Sideloadly (Windows, Mac), AltStore (Windows, Mac) or Impactor (Linux). New to this? Follow the step-by-step guide: https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/INSTALL.md" \
+              > "$NOTES_FILE"
+          fi
+          cp "$NOTES_FILE" notes.md
+          printf '\n_Build %s, commit %s._\n' "${{ github.run_number }}" "${GITHUB_SHA::7}" >> notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/Kinema.ipa --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" out/Kinema.ipa --title "Kinema ${VERSION}" --notes-file notes.md --target "$GITHUB_SHA"
+          fi
+
+      # The AltStore / SideStore source lives in a gist; this adds each new
+      # release to it. Needs a secret GIST_TOKEN (a classic token with only
+      # the "gist" scope); without it the step skips quietly.
+      - name: Update the source gist
+        if: github.ref == 'refs/heads/main'
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: ${{ vars.SOURCE_GIST_ID || '6e3a3c18525a228d03924674430c4d48' }}
+          BUILD: ${{ github.run_number }}
+          IPA: out/Kinema.ipa
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_FILE: evropiani.json
+          SOURCE_NAME: evropiani
+          DEVELOPER_NAME: evropiani
+          APP_DETAILS: .github/source/kinema.json
+          SOURCE_IDENTIFIER: app.evropiani.source
+          SOURCE_ICON: https://avatars.githubusercontent.com/u/298600384?s=400&u=352dc8c68bae25f44df17fdb24781be2d269ffbd&v=4
+        run: |
+          export VERSION=$(grep -m1 "MARKETING_VERSION" Kinema.xcodeproj/project.pbxproj | sed -E 's/.*= ([^;]+);/\1/')
+          export NOTES_FILE=".github/release-notes/v${VERSION}.md"
+          python3 .github/scripts/update-source.py

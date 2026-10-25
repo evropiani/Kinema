@@ -1,0 +1,7 @@
+{
+  "iconURL": "https://raw.githubusercontent.com/evropiani/Kinema/main/docs/icon.png",
+  "tintColor": "#3B4E7B",
+  "subtitle": "A Jellyfin player for films and shows.",
+  "localizedDescription": "Kinema is a native iPhone and iPad client for Jellyfin, made to look and feel like Kultr.\n\n• A home page with featured titles, Continue Watching, Next Up and what's new in every library.\n• Big, artwork-tinted pages for every film and show: cast, seasons and episodes, similar titles, versions, and badges for 4K, HDR, Dolby Vision and Atmos.\n• A player made for watching: swipe for brightness and volume, double-tap to skip, hold for 2× speed, pinch to fill, chapters, Skip Intro and Skip Credits, Up Next, speed from 0.25× to 4×.\n• Subtitles drawn by Kinema: size, colour, outline, background, position and brightness, a second subtitle track at the same time, a delay to fix out-of-sync files, and online subtitle search.\n• Plays everything your server has: MP4 and MOV directly, MKV and the rest repackaged or converted by the server on the fly.\n• Picture in Picture, AirPlay, background audio, and trickplay thumbnails while scrubbing.\n• Downloads for watching offline, with your progress sent to the server later.\n• Several servers and users, Quick Connect, and liquid glass on iOS 26.\n\nFree and open source: github.com/evropiani/Kinema",
+  "screenshots": []
+}
