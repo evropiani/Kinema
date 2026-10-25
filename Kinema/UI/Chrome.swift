@@ -503,7 +503,8 @@ struct DownloadIndicator: View {
 
     var body: some View {
         let graph = AppGraph.shared
-        let active = graph.downloads.active
+        // Failed downloads wait in the Downloads tab for a retry; they don't keep the strip up.
+        let active = graph.downloads.active.filter { $0.state != .failed }
         let running = active.filter { $0.state == .downloading }
         if theme.settings.showDownloadIndicator, !active.isEmpty, graph.ui.tab != .downloads {
             let progress = running.isEmpty ? 0 : running.reduce(0) { $0 + $1.progress } / Double(running.count)
