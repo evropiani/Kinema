@@ -18,13 +18,20 @@ struct ArtworkImage: View {
 
     var body: some View {
         let url = localURL ?? image.flatMap { AppGraph.shared.imageURL($0, width: width) }
-        ZStack {
-            placeholder
-            if let url {
-                RemoteImage(url: url, pixelSize: width * 2)
+        // Explicit frames, so an image of another shape (a wide backdrop in a
+        // tall header) still fills the space, centred and cropped.
+        GeometryReader { proxy in
+            ZStack {
+                placeholder
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                if let url {
+                    RemoteImage(url: url, pixelSize: width * 2)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                }
             }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipped()
         }
-        .clipped()
         .accessibilityHidden(true)
     }
 
