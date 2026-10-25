@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import CoreImage
 import Observation
 import SwiftUI
 import UIKit

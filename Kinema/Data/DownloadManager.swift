@@ -37,7 +37,7 @@ final class DownloadManager: NSObject {
     }
 
     /** The folder downloads live in (kept out of iCloud backups). */
-    static let folder: URL = {
+    nonisolated static let folder: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         var url = base.appendingPathComponent("Downloads", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -404,7 +404,7 @@ final class DownloadManager: NSObject {
         }
     }
 
-    static func size(of url: URL) -> Int64 {
+    nonisolated static func size(of url: URL) -> Int64 {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return 0 }
