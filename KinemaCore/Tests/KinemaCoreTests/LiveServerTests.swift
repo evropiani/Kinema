@@ -92,4 +92,20 @@ final class LiveServerTests: XCTestCase {
         let users = try await JellyfinClient(baseURL: client.baseURL, info: client.info).publicUsers()
         XCTAssertNotNil(users)
     }
+
+    /** Against the two intro databases, only when KINEMA_LIVE_INTRODB is set. */
+    func testFindsIntrosOnline() async throws {
+        guard ProcessInfo.processInfo.environment["KINEMA_LIVE_INTRODB"] != nil else { throw XCTSkip("KINEMA_LIVE_INTRODB not set") }
+        var episode = Item(id: "e", name: "Cat's in the Bag...", type: "Episode")
+        episode.parentIndexNumber = 1
+        episode.indexNumber = 2
+        let lookup = try XCTUnwrap(IntroDatabase.Lookup(item: episode, seriesIds: ["Tmdb": "1396", "Imdb": "tt0903747"]))
+        guard case .found(let found) = await IntroDatabase.fetch(lookup, userAgent: "KinemaTests/1.0") else { return XCTFail("nothing found") }
+        XCTAssertTrue(found.contains { $0.type == "Intro" })
+
+        var imdbOnly = lookup
+        imdbOnly.tmdbId = nil
+        let fromIntroDB = await IntroDatabase.fetch(imdbOnly, userAgent: "KinemaTests/1.0")
+        if case .found(let more) = fromIntroDB { XCTAssertFalse(more.isEmpty) } else { XCTFail("\(fromIntroDB)") }
+    }
 }

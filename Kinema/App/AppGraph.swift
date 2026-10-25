@@ -15,6 +15,7 @@ final class AppGraph {
     let ui = AppUI()
     let updates = UpdateChecker()
     let markers = MarkersStore()
+    let onlineSegments = OnlineSegments()
     // Lazy only so they can be handed `self`; all of them are created in init.
     private(set) lazy var library = LibraryStore(graph: self)
     private(set) lazy var downloads = DownloadManager(graph: self)

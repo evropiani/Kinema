@@ -108,6 +108,7 @@ private func setting<T>(_ key: WritableKeyPath<Settings, T>) -> Binding<T> {
 private struct AccountsPage: View {
     @Environment(\.kinema) private var theme
     @State private var confirmSignOut: ServerProfile?
+    @State private var quickConnect = false
 
     var body: some View {
         let graph = AppGraph.shared
@@ -115,26 +116,45 @@ private struct AccountsPage: View {
         List {
             Section {
                 ForEach(auth.profiles) { profile in
-                    Button { auth.switchTo(profile.id) } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(profile.username).font(KFont.titleSmall).foregroundStyle(theme.colors.ink)
-                                Text("\(profile.serverName) · \(profile.host)").font(KFont.bodySmall).foregroundStyle(theme.colors.ink3)
+                    Group {
+                        if profile.id == auth.activeId {
+                            // The account in use: Quick Connect signs another device in as it.
+                            HStack(spacing: 12) {
+                                accountText(profile, active: true)
+                                Spacer(minLength: 8)
+                                Button {
+                                    Haptics.tap()
+                                    quickConnect = true
+                                } label: {
+                                    Label("Quick Connect", systemImage: "key.fill")
+                                        .font(KFont.labelLarge)
+                                        .foregroundStyle(theme.colors.accent)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(Capsule().fill(theme.colors.accentSoft))
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityHint("Sign in another device with the code it shows")
                             }
-                            Spacer()
-                            if profile.id == auth.activeId {
-                                Image(systemName: "checkmark").foregroundStyle(theme.colors.accent)
+                        } else {
+                            Button { auth.switchTo(profile.id) } label: {
+                                HStack {
+                                    accountText(profile, active: false)
+                                    Spacer()
+                                }
+                                .contentShape(Rectangle())
                             }
+                            .buttonStyle(PressableStyle())
                         }
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(PressableStyle())
                     .swipeActions {
                         Button(role: .destructive) { confirmSignOut = profile } label: { Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") }
                     }
                 }
             } footer: {
-                Text("Each account keeps its own downloads. Swipe one to sign out of it.")
+                Text(auth.profiles.count > 1
+                     ? "Tap an account to switch to it. Each account keeps its own downloads. Swipe one to sign out of it. Quick Connect signs in another device, such as a TV, with the code it shows."
+                     : "Quick Connect signs in another device, such as a TV, with the code it shows. Swipe the account to sign out of it.")
             }
             Section {
                 Button { graph.ui.login = LoginRequest() } label: {
@@ -154,6 +174,11 @@ private struct AccountsPage: View {
             }
         }
         .navigationTitle("Accounts")
+        .sheet(isPresented: $quickConnect) {
+            QuickConnectSheet()
+                .environment(\.kinema, theme)
+                .presentationDetents([.medium, .large])
+        }
         .confirmationDialog(
             "Sign out of \(confirmSignOut?.username ?? "")?",
             isPresented: Binding(get: { confirmSignOut != nil }, set: { if !$0 { confirmSignOut = nil } }),
@@ -165,6 +190,124 @@ private struct AccountsPage: View {
                 auth.signOut(profile.id)
             }
             Button("Cancel", role: .cancel) {}
+        }
+    }
+}
+
+extension AccountsPage {
+    private func accountText(_ profile: ServerProfile, active: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(profile.username).font(KFont.titleSmall).foregroundStyle(theme.colors.ink)
+                if active {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(theme.colors.accent)
+                        .accessibilityLabel("In use")
+                }
+            }
+            Text("\(profile.serverName) · \(profile.host)")
+                .font(KFont.bodySmall)
+                .foregroundStyle(theme.colors.ink3)
+                .lineLimit(2)
+        }
+    }
+}
+
+/**
+ * Quick Connect, from this side: the TV or computer that wants to sign in
+ * shows a code, and entering it here signs it in as the account in use.
+ */
+private struct QuickConnectSheet: View {
+    @Environment(\.kinema) private var theme
+    @Environment(\.dismiss) private var dismiss
+    @State private var code = ""
+    @State private var enabled: Bool?
+    @State private var working = false
+    @State private var failure: String?
+    @State private var done = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let graph = AppGraph.shared
+        let c = theme.colors
+        VStack(spacing: 18) {
+            Image(systemName: done ? "checkmark.circle.fill" : "key.fill")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundStyle(done ? c.success : c.accent)
+                .frame(width: 72, height: 72)
+                .background(Circle().fill(c.accentSoft))
+                .contentTransition(.symbolEffect(.replace))
+            Text(done ? "Signed In" : "Quick Connect")
+                .font(KFont.headlineSmall.weight(.semibold))
+                .foregroundStyle(c.ink)
+            Group {
+                if done {
+                    Text("The other device is now signed in as \(graph.auth.active?.username ?? "you").")
+                } else if enabled == false {
+                    Text("Quick Connect is turned off on this server. An administrator can turn it on in the Dashboard, under General.")
+                } else {
+                    Text("On the TV, computer or phone you want to sign in, choose Quick Connect. Then type the code it shows here.")
+                }
+            }
+            .font(KFont.bodyMedium)
+            .foregroundStyle(c.ink2)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if !done && enabled != false {
+                TextField("Code", text: Binding(get: { code }, set: { code = String($0.filter(\.isNumber).prefix(10)); failure = nil }))
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                    .font(.system(size: 32, weight: .semibold, design: .rounded).monospacedDigit())
+                    .multilineTextAlignment(.center)
+                    .kerning(6)
+                    .foregroundStyle(c.ink)
+                    .frame(height: 60)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(c.glass))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(failure == nil ? c.edge : c.danger, lineWidth: 1))
+                    .focused($focused)
+                    .submitLabel(.go)
+                    .onSubmit(authorize)
+                if let failure {
+                    Text(failure).font(KFont.bodySmall).foregroundStyle(c.danger).multilineTextAlignment(.center)
+                }
+                WideGlassButton(title: working ? "Signing In…" : "Sign In Device", icon: "checkmark", prominent: true, enabled: code.count >= 6 && !working, action: authorize)
+            } else {
+                WideGlassButton(title: "Done", icon: "checkmark", prominent: done) { dismiss() }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(c.elevated.ignoresSafeArea())
+        .tint(c.accent)
+        .task {
+            enabled = await graph.auth.client?.quickConnectEnabled() ?? false
+            if enabled == true { focused = true }
+        }
+    }
+
+    private func authorize() {
+        guard code.count >= 6, !working, let client = AppGraph.shared.auth.client else { return }
+        working = true
+        failure = nil
+        Task {
+            do {
+                try await client.quickConnectAuthorize(code: code)
+                Haptics.success()
+                withAnimation(theme.spring) { done = true }
+                focused = false
+            } catch {
+                switch JellyfinError.from(error) {
+                case .notFound, .server(400, _):
+                    failure = "That code isn't right, or it ran out. Check it, or start Quick Connect again on the other device."
+                case .unauthorized, .forbidden:
+                    failure = "The server didn't allow it. Quick Connect may be turned off there."
+                case let other:
+                    failure = other.localizedDescription
+                }
+            }
+            working = false
         }
     }
 }
@@ -460,10 +603,11 @@ private struct PlaybackPage: View {
                 Picker("Recaps and previews", selection: setting(\.skipRecap)) {
                     ForEach(SkipMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
+                Toggle("Find intros and credits online", isOn: setting(\.onlineSegments))
             } header: {
                 Text("Skipping")
             } footer: {
-                Text("Uses the media segments Jellyfin 10.10 and later find (with a plugin such as Intro Skipper). Where the server finds none, mark them yourself in the player: ••• → The intro ends here / The credits start here, for every episode of the show.")
+                Text("Kinema uses the intros and credits your server knows (Jellyfin 10.10 and later, with a plugin such as Intro Skipper). Where it knows none, Kinema looks the episode or film up in TheIntroDB and IntroDB, free databases of intro and credit times kept by their users, by its TMDB, TVDB or IMDb id. You can also mark them yourself in the player (•••), for every episode of a show. Switch all of this, and automatic skipping, on and off in the player's ••• menu too.")
             }
             Section("Language") {
                 Picker("Audio", selection: setting(\.audioLanguage)) {
@@ -687,6 +831,17 @@ private struct StoragePage: View {
             Section {
                 LabeledContent("Downloads", value: Format.fileSize(graph.downloads.usedBytes))
                 NavigationLink("Manage Downloads", value: Route.settings(.downloads))
+            }
+            if graph.onlineSegments.count > 0 {
+                Section {
+                    LabeledContent("Intros and credits found online", value: Format.count(graph.onlineSegments.count, "title"))
+                    Button("Forget Them") {
+                        graph.onlineSegments.clearAll()
+                        graph.messages.show("Cleared", .success)
+                    }
+                } footer: {
+                    Text("Kept so they're there offline and each title is looked up once. They're looked up again when played.")
+                }
             }
             if !graph.markers.all.isEmpty {
                 Section {

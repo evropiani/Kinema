@@ -378,4 +378,58 @@ final class VidHubSettingsTests: XCTestCase {
         XCTAssertEqual(counts.episodes, 7)
         XCTAssertEqual(counts.collections, 0)
     }
+
+    func testLooksEpisodesUpByTheShowsIds() throws {
+        var episode = Item(id: "e1", name: "Pilot", type: "Episode")
+        episode.parentIndexNumber = 1
+        episode.indexNumber = 2
+        episode.runTimeTicks = 28_000_000_000
+        XCTAssertNil(IntroDatabase.Lookup(item: episode, seriesIds: nil), "an episode needs its show's ids")
+
+        let tmdb = try XCTUnwrap(IntroDatabase.Lookup(item: episode, seriesIds: ["Tmdb": "1396", "Tvdb": "81189", "Imdb": "tt0903747"]))
+        let url = try XCTUnwrap(tmdb.theIntroDBURL()).absoluteString
+        XCTAssertTrue(url.hasPrefix("https://api.theintrodb.org/v4/media?tmdb_id=1396&season=1&episode=2"), url)
+        XCTAssertTrue(url.hasSuffix("duration_ms=2800000"), url)
+        XCTAssertEqual(tmdb.introDBURL()?.absoluteString, "https://api.introdb.app/segments?imdb_id=tt0903747&season=1&episode=2")
+
+        // With TVDB's own id for the episode, TVDB pins it whatever the numbering.
+        episode.providerIds = ["Tvdb": "349232"]
+        let tvdb = try XCTUnwrap(IntroDatabase.Lookup(item: episode, seriesIds: ["Tmdb": "1396", "Tvdb": "81189"]))
+        XCTAssertTrue(try XCTUnwrap(tvdb.theIntroDBURL()).absoluteString.contains("tvdb_id=81189&tvdb_episode_id=349232&season=1&episode=2"))
+        XCTAssertNil(tvdb.introDBURL())
+
+        var movie = Item(id: "m1", name: "Inception", type: "Movie")
+        movie.providerIds = ["Tmdb": "27205", "Imdb": "tt1375666"]
+        let film = try XCTUnwrap(IntroDatabase.Lookup(item: movie, seriesIds: nil))
+        XCTAssertEqual(film.theIntroDBURL()?.absoluteString, "https://api.theintrodb.org/v4/media?tmdb_id=27205")
+        XCTAssertNil(IntroDatabase.Lookup(item: Item(id: "m2", name: "No ids", type: "Movie"), seriesIds: nil))
+    }
+
+    func testReadsBothIntroDatabases() throws {
+        let theIntroDB = IntroDatabase.parseTheIntroDB(Data(#"{"tvdb_id":81189,"type":"tv","season":1,"episode":2,"intro":[{"start_ms":314568,"end_ms":330969}],"credits":[{"start_ms":2843000,"end_ms":null}],"recap":[{"start_ms":null,"end_ms":45000}]}"#.utf8))
+        XCTAssertEqual(theIntroDB.map(\.type), ["Intro", "Recap", "Outro"])
+        let segments = IntroDatabase.segments(theIntroDB, duration: 2900)
+        XCTAssertEqual(segments.map(\.type), ["Recap", "Intro", "Outro"])
+        XCTAssertEqual(segments[0].start, 0)
+        XCTAssertEqual(segments[1].start, 314.568, accuracy: 0.001)
+        XCTAssertEqual(segments[2].end, 2900, accuracy: 0.001)
+        // Timed on a longer cut: the credits would start after this one ends.
+        XCTAssertEqual(IntroDatabase.segments(theIntroDB, duration: 2000).map(\.type), ["Recap", "Intro"])
+
+        let introDB = IntroDatabase.parseIntroDB(Data(#"{"imdb_id":"tt0944947","media_type":"tv","season":1,"episode":1,"intro":{"start_sec":437,"end_sec":531,"start_ms":437000,"end_ms":531000},"recap":null,"outro":{"start_sec":3631.5,"end_sec":3699.5},"post_credits":null}"#.utf8))
+        XCTAssertEqual(introDB, [
+            IntroDatabase.Found(type: "Intro", startMs: 437_000, endMs: 531_000, source: "IntroDB"),
+            IntroDatabase.Found(type: "Outro", startMs: 3_631_500, endMs: 3_699_500, source: "IntroDB"),
+        ])
+        XCTAssertTrue(IntroDatabase.parseTheIntroDB(Data("not json".utf8)).isEmpty)
+        XCTAssertTrue(IntroDatabase.parseIntroDB(Data()).isEmpty)
+    }
+
+    func testPrefersTheServersSegmentsThenMarksThenTheDatabase() {
+        let server = [MediaSegment(id: "s", type: "Intro", start: 60, end: 90)]
+        let marked = [MediaSegment(id: "marker-intro", type: "Intro", start: 0, end: 80), MediaSegment(id: "marker-outro", type: "Outro", start: 2500, end: 2600)]
+        let online = [MediaSegment(id: "online-outro-0", type: "Outro", start: 2400, end: 2600), MediaSegment(id: "online-recap-1", type: "Recap", start: 0, end: 40)]
+        let merged = IntroDatabase.merge(server: server, marked: marked, online: online)
+        XCTAssertEqual(merged.map(\.id), ["online-recap-1", "s", "marker-outro"])
+    }
 }

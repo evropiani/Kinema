@@ -83,6 +83,7 @@ private struct TopBar: View {
 private struct MoreMenu: View {
     var body: some View {
         let player = AppGraph.shared.player
+        let settings = AppGraph.shared.settings.settings
         Menu {
             if player.offline == nil {
                 Button { open(.quality) } label: { Label("Quality", systemImage: "dial.medium") }
@@ -101,6 +102,17 @@ private struct MoreMenu: View {
             }
             Button { player.toggleOrientation() } label: {
                 Label(player.portrait ? "Landscape" : "Portrait", systemImage: "rectangle.portrait.rotate")
+            }
+            Section(player.segmentSources.map { "Skipping · from \($0)" } ?? "Skipping") {
+                Toggle(isOn: Binding(get: { settings.skipIntro == .automatic }, set: { player.setAutoSkip(intro: $0) })) {
+                    Label("Skip intros automatically", systemImage: "forward.end")
+                }
+                Toggle(isOn: Binding(get: { settings.skipCredits == .automatic }, set: { player.setAutoSkip(credits: $0) })) {
+                    Label("Skip credits automatically", systemImage: "forward.end.alt")
+                }
+                Toggle(isOn: Binding(get: { settings.onlineSegments }, set: { player.setOnlineSegments($0) })) {
+                    Label("Find intros and credits online", systemImage: "globe")
+                }
             }
             if player.item?.kind == .episode {
                 Section("Intro and credits for this show") {

@@ -143,6 +143,8 @@ final class DownloadManager: NSObject {
             record.state = .queued
             all.append(record)
             added += 1
+            // Its intro and credits, kept for watching offline.
+            graph.onlineSegments.prefetch(item)
         }
         save()
         reload()

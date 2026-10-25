@@ -126,13 +126,14 @@ enum ScreenshotDriver {
         case "settings":
             actions.selectTab(.settings)
             return nil
-        case "settings-general", "settings-appearance", "settings-playback", "settings-player":
+        case "settings-general", "settings-appearance", "settings-playback", "settings-player", "settings-accounts":
             actions.selectTab(.settings)
             try? await Task.sleep(nanoseconds: 600_000_000)
             let page: SettingsPage = switch screen {
             case "settings-general": .general
             case "settings-appearance": .appearance
             case "settings-playback": .playback
+            case "settings-accounts": .accounts
             default: .gestures
             }
             actions.navigate(.settings(page))

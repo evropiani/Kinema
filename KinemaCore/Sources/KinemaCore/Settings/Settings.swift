@@ -263,6 +263,8 @@ struct Settings: Codable, Hashable {
     var rememberSpeed = false
     var lastSpeed = 1.0
     var preloadNextEpisode = true
+    /** Look intros and credits up online (TheIntroDB, IntroDB) when the server has none. */
+    var onlineSegments = true
     /** Megabytes of video to load ahead; 0 lets iOS decide. */
     var maxCacheMB = 0
     var allowHEVC = true
@@ -312,7 +314,7 @@ struct Settings: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case theme, nightMode, corners, posterSize, backdrops, reduceMotion, homeSections, hiddenLibraries, mergeNextUp
         case hideSpoilers, defaultSort, defaultSortDescending, askOnCellular
-        case rememberSpeed, lastSpeed, preloadNextEpisode, maxCacheMB, allowHEVC, allowAV1, allowDolbyVision
+        case rememberSpeed, lastSpeed, preloadNextEpisode, onlineSegments, maxCacheMB, allowHEVC, allowAV1, allowDolbyVision
         case controlsHideDelay, controlsShadow, landscapeByDefault, showCaptureButtons, seekSensitivity
         case screenshotFormat, gifFrameRate, gifWidth
         case subtitleSource, loadEmbeddedSubtitles, onlineSubtitleLanguage
@@ -348,6 +350,7 @@ struct Settings: Codable, Hashable {
         rememberSpeed = c.lenient(Bool.self, .rememberSpeed) ?? d.rememberSpeed
         lastSpeed = c.number(.lastSpeed) ?? d.lastSpeed
         preloadNextEpisode = c.lenient(Bool.self, .preloadNextEpisode) ?? d.preloadNextEpisode
+        onlineSegments = c.lenient(Bool.self, .onlineSegments) ?? d.onlineSegments
         maxCacheMB = c.int(.maxCacheMB) ?? d.maxCacheMB
         allowHEVC = c.lenient(Bool.self, .allowHEVC) ?? d.allowHEVC
         allowAV1 = c.lenient(Bool.self, .allowAV1) ?? d.allowAV1

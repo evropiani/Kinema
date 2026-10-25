@@ -99,7 +99,7 @@ jobs:
             xcrun simctl spawn "$UDID" log show --last 20m --style compact --predicate 'process == "Kinema"' > "shots/${prefix}log.txt" 2>&1 || true
             xcrun simctl shutdown "$UDID" || true
           }
-          shoot 26 "" welcome server home library movie series episodes search found settings settings-general settings-appearance settings-playback settings-player player player-controls downloads
+          shoot 26 "" welcome server home library movie series episodes search found settings settings-accounts settings-general settings-appearance settings-playback settings-player player player-controls downloads
           shoot 18 "ios18-" home lens library movie
           LOOK=light shoot 26 "light-" home movie
 

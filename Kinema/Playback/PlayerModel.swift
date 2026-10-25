@@ -113,6 +113,9 @@ final class PlayerModel: NSObject {
     /** Recording a GIF of what's playing. */
     private(set) var recordingGIF = false
     @ObservationIgnored private var gifTask: Task<Void, Never>?
+    /** The server's own segments, and what the online databases have, merged with the marks into [segments]. */
+    @ObservationIgnored private var serverSegments: [MediaSegment] = []
+    @ObservationIgnored private var onlineFound: [IntroDatabase.Found] = []
     @ObservationIgnored private var session = 0
 
     init(graph: AppGraph) {
@@ -176,6 +179,7 @@ final class PlayerModel: NSObject {
         let asset = AVURLAsset(url: url)
         start(AVPlayerItem(asset: asset), at: startPosition)
         Task { await loadSubtitles() }
+        Task { await loadSegments(record.item) }
         loadEpisodesAround(record.item)
     }
 
@@ -196,6 +200,8 @@ final class PlayerModel: NSObject {
         burnedIn = false
         maxBitrateOverride = nil
         segments = []
+        serverSegments = []
+        onlineFound = []
         activeSegment = nil
         nextEpisode = nil
         previousEpisode = nil
@@ -357,8 +363,8 @@ final class PlayerModel: NSObject {
         start(AVPlayerItem(asset: asset ?? AVURLAsset(url: prepared.stream.url)), at: position)
         await loadSubtitles()
         if offline == nil {
-            let id = prepared.item.id
-            Task { await loadSegments(id) }
+            let playing = prepared.item
+            Task { await loadSegments(playing) }
             loadEpisodesAround(prepared.item)
         }
     }
@@ -772,40 +778,83 @@ final class PlayerModel: NSObject {
 
     // ---------------------------------------------------- segments, chapters --
 
-    private func loadSegments(_ id: String) async {
-        guard let client = graph.auth.client else { return }
-        let found = await client.mediaSegments(id)
-        if item?.id == id { segments = withMarkers(found) }
+    /**
+     * Intros, recaps and credits for [playing]: the server's own; where it
+     * has none, the ones marked by hand; and where there are none of those
+     * either, the online databases' (when Find intros and credits online is on).
+     */
+    private func loadSegments(_ playing: Item) async {
+        let id = playing.id
+        if offline == nil, let client = graph.auth.client {
+            let found = await client.mediaSegments(id)
+            guard item?.id == id else { return }
+            serverSegments = found
+        }
+        rebuildSegments()
+        await loadOnlineSegments(playing)
     }
 
-    /** The server's segments, plus the intro and credits marked by hand for this series where it has none. */
-    private func withMarkers(_ found: [MediaSegment]) -> [MediaSegment] {
-        guard let seriesId = item?.seriesId, let markers = graph.markers.markers(seriesId) else { return found }
+    private func loadOnlineSegments(_ playing: Item) async {
+        let have = Set(serverSegments.map(\.type))
+        guard graph.settings.settings.onlineSegments, !(have.contains("Intro") && have.contains("Outro")) else { return }
+        let found = await graph.onlineSegments.find(playing)
+        guard item?.id == playing.id else { return }
+        onlineFound = found
+        rebuildSegments()
+    }
+
+    private func rebuildSegments() {
         let duration = clock.duration > 0 ? clock.duration : (item?.runtime ?? 0)
-        let have = Set(found.map(\.type))
-        let added = markers.segments(duration: duration).filter { !have.contains($0.type) }
-        return (found + added).sorted { $0.startTicks < $1.startTicks }
+        let marked = item?.seriesId.flatMap { graph.markers.markers($0) }?.segments(duration: duration) ?? []
+        let online = graph.settings.settings.onlineSegments ? IntroDatabase.segments(onlineFound, duration: duration) : []
+        segments = IntroDatabase.merge(server: serverSegments, marked: marked, online: online)
+    }
+
+    /** Where this item's intros and credits come from, for the player's menu. */
+    var segmentSources: String? {
+        var sources: [String] = []
+        if !serverSegments.isEmpty { sources.append("your server") }
+        if segments.contains(where: { $0.id.hasPrefix("marker-") }) { sources.append("your marks") }
+        let online = Set(onlineFound.map(\.source))
+        if graph.settings.settings.onlineSegments, segments.contains(where: { $0.id.hasPrefix("online-") }) { sources += online.sorted() }
+        return sources.isEmpty ? nil : sources.joined(separator: ", ")
+    }
+
+    /** Settings → Playback → Find intros and credits online, from the player. */
+    func setOnlineSegments(_ on: Bool) {
+        graph.settings.update { $0.onlineSegments = on }
+        rebuildSegments()
+        if on, let item { Task { await loadOnlineSegments(item) } }
+    }
+
+    /** Skip intros (or credits) by themselves, or show a button: also in Settings → Playback → Skipping. */
+    func setAutoSkip(intro on: Bool) {
+        graph.settings.update { $0.skipIntro = on ? .automatic : .button }
+    }
+
+    func setAutoSkip(credits on: Bool) {
+        graph.settings.update { $0.skipCredits = on ? .automatic : .button }
     }
 
     /** Mark where this series' intro ends (or its credits start), here and now. */
     func markIntroEnd() {
         guard let seriesId = item?.seriesId else { return }
         graph.markers.update(seriesId) { $0.introEnd = clock.position }
-        segments = withMarkers(segments.filter { !$0.id.hasPrefix("marker-") })
+        rebuildSegments()
         graph.messages.show("Intro ends at \(Format.clock(clock.position)) in every episode", .success)
     }
 
     func markCreditsStart() {
         guard let seriesId = item?.seriesId, clock.duration > 0 else { return }
         graph.markers.update(seriesId) { $0.creditsFromEnd = clock.duration - clock.position }
-        segments = withMarkers(segments.filter { !$0.id.hasPrefix("marker-") })
+        rebuildSegments()
         graph.messages.show("Credits start \(Format.clock(clock.duration - clock.position)) before the end of every episode", .success)
     }
 
     func clearMarkers() {
         guard let seriesId = item?.seriesId else { return }
         graph.markers.clear(seriesId)
-        segments = segments.filter { !$0.id.hasPrefix("marker-") }
+        rebuildSegments()
         graph.messages.show("Marks cleared")
     }
 
@@ -974,6 +1023,7 @@ final class PlayerModel: NSObject {
         let library = graph.library
         let start = Ticks.seconds(library.resumeTicks(next))
         let seed = library.current(next)
+        graph.onlineSegments.prefetch(seed)
         preloadTask = Task {
             defer { if mySession == self.session { self.preloadTask = nil } }
             guard let prepared = try? await self.prepare(seed, sourceId: nil, at: start, tracks: nil, allowDirectPlay: true, maxBitrate: self.graph.maxBitrate, capped: false),

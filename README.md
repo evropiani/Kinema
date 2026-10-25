@@ -45,8 +45,9 @@ for free.
   fit / fill / stretch, Picture in Picture, AirPlay, lock-screen controls,
   playback info (method, codecs, bitrates, dropped frames), screenshots
   (JPEG, PNG or HEIC) and **GIF recording**. The next episode is preloaded
-  near the end, and where the server knows no intro or credits you can mark
-  them once for the whole show.
+  near the end. Where the server knows no intro or credits, Kinema finds
+  them in the online databases [TheIntroDB](https://theintrodb.org) and
+  [IntroDB](https://introdb.app), or you mark them once for the whole show.
 - **Subtitles drawn by Kinema**, in your style: size, colour, outline,
   background, brightness, font and position, a **second subtitle track** at
   the same time, a delay to fix out-of-sync files, and a **search for
@@ -69,7 +70,8 @@ for free.
   downloads, and for admins library scans and metadata refreshes.
 - **Several servers and users**, sign-in with a password or **Quick
   Connect**, a list of the server's users to tap, and Jellyfin's demo server
-  to try without one.
+  to try without one. Kinema can also sign other devices in with Quick
+  Connect, from Settings → Accounts.
 - **Liquid glass** on iOS 26 (the system's own tab bar with the round
   search button); on iOS 17 and 18 Kinema draws a floating glass bar that
   behaves the same way. Dark, light or automatic, and **Night mode** for

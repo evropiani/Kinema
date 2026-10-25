@@ -368,6 +368,18 @@ final class JellyfinClient: @unchecked Sendable {
         try await post(AuthenticationResult.self, "/Users/AuthenticateWithQuickConnect", body: QuickConnectSecret(secret: secret))
     }
 
+    /**
+     * Sign in the device showing [code] (on its Quick Connect screen) as this
+     * user. The server answers 404 for a code it doesn't know (or that ran
+     * out) and 401 when Quick Connect is turned off.
+     */
+    func quickConnectAuthorize(code: String) async throws {
+        var query = [URLQueryItem(name: "code", value: code)]
+        if let userId { query.append(URLQueryItem(name: "userId", value: userId)) }
+        let data = try await data("POST", "/QuickConnect/Authorize", query: query, timeout: 15)
+        if (try? JSONDecoder().decode(Bool.self, from: data)) == false { throw JellyfinError.notFound }
+    }
+
     func me() async throws -> UserDto {
         try await get(UserDto.self, "/Users/Me")
     }
