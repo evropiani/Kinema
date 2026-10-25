@@ -128,6 +128,8 @@ private struct AccountsPage: View {
                                 } label: {
                                     Label("Quick Connect", systemImage: "key.fill")
                                         .font(KFont.labelLarge)
+                                        .lineLimit(1)
+                                        .fixedSize()
                                         .foregroundStyle(theme.colors.accent)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 8)
