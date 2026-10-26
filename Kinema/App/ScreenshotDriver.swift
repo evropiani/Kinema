@@ -115,6 +115,27 @@ enum ScreenshotDriver {
                 actions.open(episode)
             }
             return "episode"
+        case "badges", "badges-series":
+            // Some films and episodes shown as downloaded, for the badges: the
+            // newest films whole, the show's next episode whole, the show itself in part.
+            var movieQuery = ItemQuery(includeTypes: ["Movie"])
+            movieQuery.limit = 50
+            let movies = (try? await client?.items(movieQuery).items) ?? []
+            var pretend = movies
+            if let series = await first(["Series"]), let episodes = try? await client?.episodes(seriesId: series.id) {
+                pretend += Array(episodes.prefix(2))
+                if let next = try? await client?.nextUp(seriesId: series.id, limit: 1).first { pretend.append(next) }
+                if screen == "badges-series" {
+                    graph.downloads.pretendDownloaded(pretend)
+                    actions.selectTab(.home)
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    actions.open(series)
+                    return "series"
+                }
+            }
+            graph.downloads.pretendDownloaded(pretend)
+            actions.selectTab(.home)
+            return "home"
         case "search":
             actions.selectTab(.search)
             return nil

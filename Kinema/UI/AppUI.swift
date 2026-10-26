@@ -271,8 +271,11 @@ final class AppActions {
         ui.downloadPrompt = items
     }
 
-    /** Download every episode of a season or series. */
-    func downloadAll(in item: Item) {
+    /**
+     * Download every episode of a season or series, or with [onlyUnwatched]
+     * the ones not watched yet that aren't downloaded already.
+     */
+    func downloadAll(in item: Item, onlyUnwatched: Bool = false) {
         Task {
             guard let client = graph.auth.client else { return }
             var episodes: [Item] = []
@@ -281,7 +284,15 @@ final class AppActions {
             case .season: episodes = (try? await client.episodes(seriesId: item.seriesId ?? item.parentId ?? "", seasonId: item.id)) ?? []
             default: episodes = [item]
             }
-            download(episodes.filter { $0.locationType != "Virtual" })
+            episodes = episodes.filter { $0.locationType != "Virtual" }
+            if onlyUnwatched {
+                episodes = episodes.filter { !graph.library.isPlayed($0) && graph.downloads.record($0.id) == nil }
+                if episodes.isEmpty {
+                    messages.show("Every episode you haven't watched is downloaded already.")
+                    return
+                }
+            }
+            download(episodes)
         }
     }
 }

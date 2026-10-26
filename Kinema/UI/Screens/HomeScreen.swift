@@ -324,10 +324,13 @@ private struct HeroPage: View {
                         .lineLimit(2)
                         .shadow(color: .black.opacity(0.4), radius: 8)
                 }
-                Text(meta)
-                    .font(KFont.labelMedium)
-                    .foregroundStyle(c.ink2)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(meta)
+                        .font(KFont.labelMedium)
+                        .foregroundStyle(c.ink2)
+                        .lineLimit(1)
+                    DownloadBadge(item: item, size: 13)
+                }
                 GlassGroup(spacing: 12) {
                     HStack(spacing: 12) {
                         WideGlassButton(title: graph.library.resumeTicks(item) > 0 ? "Resume" : "Play", icon: "play.fill", prominent: true) {

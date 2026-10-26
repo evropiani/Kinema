@@ -276,6 +276,19 @@ struct DetailScreen: View {
             } label: {
                 actionLabel(icon, record.isDone ? "Downloaded" : record.state == .failed ? "Failed" : "\(Int(record.progress * 100))%", on: record.isDone)
             }
+        } else if !item.isPlayable, graph.downloads.coverage(of: item) != .none {
+            // A show or season with episodes downloaded: whole (every unwatched one) or in part.
+            let full = graph.downloads.coverage(of: item) == .full
+            Menu {
+                if !full {
+                    Button { graph.actions.downloadAll(in: item, onlyUnwatched: true) } label: {
+                        Label("Download the unwatched rest", systemImage: "arrow.down.circle")
+                    }
+                }
+                Button { graph.actions.selectTab(.downloads) } label: { Label("Go to Downloads", systemImage: "arrow.down.to.line") }
+            } label: {
+                actionLabel(full ? "arrow.down.circle.fill" : "arrow.down.circle.dotted", full ? "Downloaded" : "Partly", on: full)
+            }
         } else {
             actionButton("arrow.down.circle", "Download", on: false) {
                 if item.isPlayable { graph.actions.download([item]) } else { graph.actions.downloadAll(in: item) }
@@ -320,6 +333,7 @@ struct DetailScreen: View {
                 Button { graph.actions.openSeries(of: item) } label: { Label("Go to \(item.seriesName ?? "series")", systemImage: "tv") }
             }
             if item.kind == .series || item.kind == .season {
+                Button { graph.actions.downloadAll(in: item, onlyUnwatched: true) } label: { Label("Download unwatched episodes", systemImage: "arrow.down.circle") }
                 Button { graph.actions.downloadAll(in: item) } label: { Label("Download all episodes", systemImage: "arrow.down.circle") }
             }
             if let url = webURL(item) {
@@ -415,6 +429,7 @@ struct DetailScreen: View {
                         Menu {
                             Button { graph.actions.setPlayed(season, true) } label: { Label("Mark season as watched", systemImage: "checkmark.circle") }
                             Button { graph.actions.setPlayed(season, false) } label: { Label("Mark season as unwatched", systemImage: "eye.slash") }
+                            Button { graph.actions.downloadAll(in: season, onlyUnwatched: true) } label: { Label("Download unwatched episodes", systemImage: "arrow.down.circle") }
                             Button { graph.actions.downloadAll(in: season) } label: { Label("Download season", systemImage: "arrow.down.circle") }
                         } label: {
                             Image(systemName: "ellipsis.circle")
@@ -442,6 +457,7 @@ struct DetailScreen: View {
                                             if graph.library.isPlayed(season) {
                                                 Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
                                             }
+                                            DownloadBadge(item: season, size: 13, color: on ? c.onAccent : nil)
                                         }
                                         .font(KFont.labelLarge)
                                         .foregroundStyle(on ? c.onAccent : c.ink)

@@ -32,6 +32,11 @@ struct ItemMenu: View {
                 Label("Download", systemImage: "arrow.down.circle")
             }
         } else if item.kind == .series || item.kind == .season {
+            if graph.downloads.coverage(of: item) != .full {
+                Button { graph.actions.downloadAll(in: item, onlyUnwatched: true) } label: {
+                    Label("Download unwatched episodes", systemImage: "arrow.down.circle")
+                }
+            }
             Button { graph.actions.downloadAll(in: item) } label: {
                 Label("Download all episodes", systemImage: "arrow.down.circle")
             }
@@ -80,10 +85,13 @@ struct PosterCard: View {
                     .shadow(color: .black.opacity(theme.colors.dark ? 0.35 : 0.12), radius: 8, y: 4)
                 if showTitle {
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(item.name)
-                            .font(KFont.titleSmall)
-                            .foregroundStyle(theme.colors.ink)
-                            .lineLimit(1)
+                        HStack(spacing: 5) {
+                            Text(item.name)
+                                .font(KFont.titleSmall)
+                                .foregroundStyle(theme.colors.ink)
+                                .lineLimit(1)
+                            DownloadBadge(item: item)
+                        }
                         if let line = subtitle ?? defaultSubtitle {
                             Text(line)
                                 .font(KFont.bodySmall)
@@ -174,10 +182,14 @@ struct LandscapeCard: View {
                     .overlay(shape.strokeBorder(theme.colors.line, lineWidth: 0.5))
                     .shadow(color: .black.opacity(theme.colors.dark ? 0.35 : 0.12), radius: 8, y: 4)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(item.kind == .episode ? (item.seriesName ?? item.name) : item.name)
-                        .font(KFont.titleSmall)
-                        .foregroundStyle(theme.colors.ink)
-                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        Text(item.kind == .episode ? (item.seriesName ?? item.name) : item.name)
+                            .font(KFont.titleSmall)
+                            .foregroundStyle(theme.colors.ink)
+                            .lineLimit(1)
+                        // For an episode, whether this episode is downloaded: it's what the card plays.
+                        DownloadBadge(item: item)
+                    }
                     Text(detail)
                         .font(KFont.bodySmall)
                         .foregroundStyle(theme.colors.ink3)
@@ -201,6 +213,35 @@ struct LandscapeCard: View {
     private func remainingText(_ progress: Double?) -> String? {
         guard let progress, item.runtime > 0 else { return nil }
         return Format.remaining(item.runtime * (1 - progress))
+    }
+}
+
+/**
+ * Next to a title: filled when it's downloaded (for a show or season, every
+ * episode not watched yet), dotted when only some of its episodes are.
+ */
+struct DownloadBadge: View {
+    @Environment(\.kinema) private var theme
+    let item: Item
+    var size: CGFloat = 14
+    /** The accent, unless it sits on the accent (a selected season). */
+    var color: Color?
+
+    var body: some View {
+        switch AppGraph.shared.downloads.coverage(of: item) {
+        case .none:
+            EmptyView()
+        case .full:
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(color ?? theme.colors.accent)
+                .accessibilityLabel("Downloaded")
+        case .partial:
+            Image(systemName: "arrow.down.circle.dotted")
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(color ?? theme.colors.accent)
+                .accessibilityLabel("Partly downloaded")
+        }
     }
 }
 

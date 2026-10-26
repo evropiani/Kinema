@@ -3,6 +3,11 @@ import Foundation
 import Observation
 import UIKit
 
+/** How much of a film, show or season is downloaded (Home's and the Library's badges). */
+enum DownloadCoverage {
+    case none, partial, full
+}
+
 /**
  * Downloads for watching offline. A file that iOS plays as it is (MP4 or
  * MOV with H.264/HEVC) is downloaded untouched; anything else is fetched as
@@ -86,6 +91,18 @@ final class DownloadManager: NSObject {
         records = all.filter { $0.profileId == profile }.sorted { $0.createdAt > $1.createdAt }
     }
 
+    #if DEBUG
+    /** For CI's screenshots only: show [items] as downloaded, in memory (no files, nothing saved). */
+    func pretendDownloaded(_ items: [Item]) {
+        guard let profile = graph.auth.activeId else { return }
+        for item in items where !records.contains(where: { $0.id == item.id }) {
+            var record = DownloadRecord(id: item.id, profileId: profile, item: item, mediaSourceId: nil, kind: .original, quality: .original)
+            record.state = .done
+            records.append(record)
+        }
+    }
+    #endif
+
     private func update(_ id: String, _ change: (inout DownloadRecord) -> Void) {
         guard let index = all.firstIndex(where: { $0.id == id && $0.profileId == graph.auth.activeId }) ?? all.firstIndex(where: { $0.id == id }) else { return }
         change(&all[index])
@@ -102,6 +119,26 @@ final class DownloadManager: NSObject {
     }
 
     var active: [DownloadRecord] { records.filter { !$0.isDone } }
+
+    /**
+     * How much of [item] is on this phone. A film or an episode is whole or
+     * not; a show or a season is whole when every episode not watched yet is
+     * downloaded, and partly when only some of its episodes are.
+     */
+    func coverage(of item: Item) -> DownloadCoverage {
+        switch item.kind {
+        case .series, .season:
+            let episodes = records.filter { record in
+                record.isDone && (item.kind == .series ? record.item.seriesId == item.id : record.item.seasonId == item.id)
+            }
+            guard !episodes.isEmpty else { return .none }
+            let unwatched = item.unplayedCount ?? 0
+            let downloadedUnwatched = episodes.filter { !graph.library.isPlayed($0.item) }.count
+            return unwatched > 0 && downloadedUnwatched >= unwatched ? .full : .partial
+        default:
+            return record(item.id)?.isDone == true ? .full : .none
+        }
+    }
 
     // -------------------------------------------------------------- files --
 
