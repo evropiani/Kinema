@@ -795,6 +795,28 @@ private struct DownloadsPage: View {
                 Text("Original keeps the file as it is (repackaged by the server when iOS can't play its format). The other qualities are converted by the server and take less space.")
             }
             Section {
+                Picker("Keep the next episodes", selection: Binding(
+                    get: { s.keepNextEpisodes },
+                    set: { count in
+                        AppGraph.shared.settings.update { $0.keepNextEpisodes = count }
+                        Task { await downloads.keepNextEpisodes() }
+                    }
+                )) {
+                    ForEach(Settings.keepNextOptions, id: \.self) { count in
+                        Text(count == 0 ? "Off" : Format.count(count, "episode")).tag(count)
+                    }
+                }
+                if s.keepNextEpisodes > 0 {
+                    Toggle("Delete them once watched", isOn: setting(\.removeWatchedDownloads))
+                }
+            } header: {
+                Text("Shows you're watching")
+            } footer: {
+                Text(s.keepNextEpisodes > 0
+                     ? "For every show you've downloaded an episode of, Kinema keeps the next \(Format.count(s.keepNextEpisodes, "episode")) after the last one you watched downloaded, and fetches more as you watch. Episodes you downloaded yourself are never deleted by this."
+                     : "Kinema can keep the next episodes of the shows you've downloaded ready, and fetch more as you watch.")
+            }
+            Section {
                 Toggle("Download on mobile data", isOn: setting(\.downloadOnCellular))
                 Stepper("At the same time: \(s.concurrentDownloads)", value: setting(\.concurrentDownloads), in: 1...5)
                 Toggle("Pause while a video plays", isOn: setting(\.pauseDownloadsWhilePlaying))

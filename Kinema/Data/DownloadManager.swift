@@ -169,28 +169,77 @@ final class DownloadManager: NSObject {
 
     /** Download [items] at [quality]. */
     func download(_ items: [Item], quality: DownloadQuality) {
-        guard let profile = graph.auth.activeId else { return }
         if graph.network.metered && !graph.settings.settings.downloadOnCellular {
             graph.messages.show("Downloads wait for Wi-Fi (change this in Settings → Downloads).")
         }
-        var added = 0
-        for item in items where item.isPlayable {
-            if all.contains(where: { $0.id == item.id && $0.profileId == profile }) { continue }
-            var record = DownloadRecord(id: item.id, profileId: profile, item: item, mediaSourceId: item.primarySource?.id, kind: .original, quality: quality)
-            record.state = .queued
-            all.append(record)
-            added += 1
-            // Its intro and credits, kept for watching offline.
-            graph.onlineSegments.prefetch(item)
-        }
-        save()
-        reload()
+        let added = enqueue(items, quality: quality, automatic: false)
         if added > 0 {
             graph.messages.show(added == 1 ? "Downloading “\(items.first?.name ?? "")”" : "Downloading \(added) episodes", .success)
         } else {
             graph.messages.show("Already downloaded.")
         }
-        pump()
+        // A show downloaded from now has its next episodes kept, too.
+        Task { await keepNextEpisodes() }
+    }
+
+    /** Queue the ones of [items] not downloaded yet; how many were. */
+    @discardableResult
+    private func enqueue(_ items: [Item], quality: DownloadQuality, automatic: Bool) -> Int {
+        guard let profile = graph.auth.activeId else { return 0 }
+        var added = 0
+        for item in items where item.isPlayable {
+            if all.contains(where: { $0.id == item.id && $0.profileId == profile }) { continue }
+            var record = DownloadRecord(id: item.id, profileId: profile, item: item, mediaSourceId: item.primarySource?.id, kind: .original, quality: quality)
+            record.state = .queued
+            record.automatic = automatic ? true : nil
+            all.append(record)
+            added += 1
+            // Its intro and credits, kept for watching offline.
+            graph.onlineSegments.prefetch(item)
+        }
+        if added > 0 {
+            save()
+            reload()
+            pump()
+        }
+        return added
+    }
+
+    // ------------------------------------------------- the next episodes --
+
+    @ObservationIgnored private var keeping = false
+
+    /**
+     * Settings → Downloads → Keep the next episodes: for every show with an
+     * episode downloaded, have the next ones (after the last watched)
+     * downloaded too, at the usual quality, and let go of the ones
+     * downloaded that way once they're watched. Runs when Kinema comes to
+     * the front, after watching, and when a download is added.
+     */
+    func keepNextEpisodes() async {
+        let settings = graph.settings.settings
+        guard settings.keepNextEpisodes > 0, !keeping, graph.network.online, graph.auth.canDownload,
+              let client = graph.auth.client else { return }
+        keeping = true
+        defer { keeping = false }
+        let shows = Set(records.compactMap { $0.item.kind == .episode ? $0.item.seriesId : nil })
+        var wanted: [Item] = []
+        for seriesId in shows.sorted() {
+            guard let episodes = try? await client.episodes(seriesId: seriesId) else { continue }
+            // Watched here and not told to the server yet counts as watched.
+            let isPlayed: (Item) -> Bool = { episode in
+                self.graph.library.isPlayed(episode) || self.record(episode.id)?.localPlayed == true
+            }
+            let next = NextEpisodes.toKeep(episodes, count: settings.keepNextEpisodes, isPlayed: isPlayed)
+            wanted += next.filter { record($0.id) == nil }
+            if settings.removeWatchedDownloads {
+                let watched = Set(episodes.filter(isPlayed).map(\.id))
+                for record in records where record.automatic == true && watched.contains(record.id) && graph.player.item?.id != record.id {
+                    remove(record.id)
+                }
+            }
+        }
+        enqueue(wanted, quality: settings.downloadQuality, automatic: true)
     }
 
     /** Start queued downloads, as many at once as Settings → Downloads allows. */

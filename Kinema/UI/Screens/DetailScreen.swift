@@ -276,22 +276,32 @@ struct DetailScreen: View {
             } label: {
                 actionLabel(icon, record.isDone ? "Downloaded" : record.state == .failed ? "Failed" : "\(Int(record.progress * 100))%", on: record.isDone)
             }
-        } else if !item.isPlayable, graph.downloads.coverage(of: item) != .none {
-            // A show or season with episodes downloaded: whole (every unwatched one) or in part.
-            let full = graph.downloads.coverage(of: item) == .full
+        } else if item.isPlayable {
+            actionButton("arrow.down.circle", "Download", on: false) { graph.actions.download([item]) }
+        } else {
+            // A show or season: which episodes to download, and how much of it is here already.
+            let coverage = graph.downloads.coverage(of: item)
+            let unwatched = item.unplayedCount ?? 0
             Menu {
-                if !full {
-                    Button { graph.actions.downloadAll(in: item, onlyUnwatched: true) } label: {
-                        Label("Download the unwatched rest", systemImage: "arrow.down.circle")
+                Section(coverage == .none ? "Download" : coverage == .full ? "Every unwatched episode is downloaded" : "Some episodes are downloaded") {
+                    if coverage != .full {
+                        Button { graph.actions.downloadAll(in: item, onlyUnwatched: true) } label: {
+                            Label(unwatched > 0 ? "Unwatched episodes (\(unwatched))" : "Unwatched episodes", systemImage: "eye.slash")
+                        }
+                    }
+                    Button { graph.actions.downloadAll(in: item) } label: {
+                        Label(item.kind == .season ? "The whole season" : "All episodes", systemImage: "square.stack")
                     }
                 }
-                Button { graph.actions.selectTab(.downloads) } label: { Label("Go to Downloads", systemImage: "arrow.down.to.line") }
+                if coverage != .none {
+                    Button { graph.actions.selectTab(.downloads) } label: { Label("Go to Downloads", systemImage: "arrow.down.to.line") }
+                }
             } label: {
-                actionLabel(full ? "arrow.down.circle.fill" : "arrow.down.circle.dotted", full ? "Downloaded" : "Partly", on: full)
-            }
-        } else {
-            actionButton("arrow.down.circle", "Download", on: false) {
-                if item.isPlayable { graph.actions.download([item]) } else { graph.actions.downloadAll(in: item) }
+                switch coverage {
+                case .none: actionLabel("arrow.down.circle", "Download", on: false)
+                case .partial: actionLabel("arrow.down.circle.dotted", "Partly", on: false)
+                case .full: actionLabel("arrow.down.circle.fill", "Downloaded", on: true)
+                }
             }
         }
     }
@@ -331,10 +341,6 @@ struct DetailScreen: View {
             }
             if item.kind == .episode {
                 Button { graph.actions.openSeries(of: item) } label: { Label("Go to \(item.seriesName ?? "series")", systemImage: "tv") }
-            }
-            if item.kind == .series || item.kind == .season {
-                Button { graph.actions.downloadAll(in: item, onlyUnwatched: true) } label: { Label("Download unwatched episodes", systemImage: "arrow.down.circle") }
-                Button { graph.actions.downloadAll(in: item) } label: { Label("Download all episodes", systemImage: "arrow.down.circle") }
             }
             if let url = webURL(item) {
                 ShareLink(item: url) { Label("Share link", systemImage: "square.and.arrow.up") }

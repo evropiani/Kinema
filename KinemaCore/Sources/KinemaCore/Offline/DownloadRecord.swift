@@ -49,6 +49,8 @@ struct DownloadRecord: Codable, Hashable, Identifiable {
     var posterFile: String?
     var backdropFile: String?
     var createdAt: Date
+    /** Downloaded by itself, to keep a show's next episodes ready (Settings → Downloads); nil for older records. */
+    var automatic: Bool?
 
     /** Watched offline and not yet told to the server. */
     var localPositionTicks: Int64?

@@ -510,6 +510,12 @@ final class PlayerModel: NSObject {
         stopSession(report: true)
         discardPreload()
         graph.downloads.pauseForPlayback(false)
+        // What was just watched may move a show's next episodes along.
+        let downloads = graph.downloads
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await downloads.keepNextEpisodes()
+        }
         if pip?.isPictureInPictureActive == true { pip?.stopPictureInPicture() }
         player.replaceCurrentItem(with: nil)
         item = nil

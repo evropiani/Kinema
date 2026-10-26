@@ -303,6 +303,10 @@ struct Settings: Codable, Hashable {
     var downloadQuality: DownloadQuality = .original
     var downloadOnCellular = false
     var downloadSubtitles = true
+    /** Keep this many of the next episodes downloaded, for every show with downloads (0: off). */
+    var keepNextEpisodes = 0
+    /** Delete the episodes downloaded that way once they're watched. */
+    var removeWatchedDownloads = true
     var concurrentDownloads = 2
     var showDownloadIndicator = true
     var pauseDownloadsWhilePlaying = false
@@ -324,7 +328,7 @@ struct Settings: Codable, Hashable {
         case autoPiP, backgroundAudio, aspect, showRemaining, audioLanguage, subtitleMode, subtitleLanguage, showSkipButtons, showEpisodeButtons
         case subtitleSize, subtitleColor, subtitleOutline, subtitleBackground, subtitleBold, subtitleFont, subtitleMargin, subtitleBrightness
         case secondaryPosition, secondaryScale
-        case downloadQuality, downloadOnCellular, downloadSubtitles, hasSeenWelcome
+        case downloadQuality, downloadOnCellular, downloadSubtitles, keepNextEpisodes, removeWatchedDownloads, hasSeenWelcome
     }
 
     init(from decoder: Decoder) throws {
@@ -411,6 +415,8 @@ struct Settings: Codable, Hashable {
 
         downloadQuality = c.lenient(DownloadQuality.self, .downloadQuality) ?? d.downloadQuality
         downloadOnCellular = c.lenient(Bool.self, .downloadOnCellular) ?? d.downloadOnCellular
+        keepNextEpisodes = max(0, c.lenient(Int.self, .keepNextEpisodes) ?? d.keepNextEpisodes)
+        removeWatchedDownloads = c.lenient(Bool.self, .removeWatchedDownloads) ?? d.removeWatchedDownloads
         downloadSubtitles = c.lenient(Bool.self, .downloadSubtitles) ?? d.downloadSubtitles
         hasSeenWelcome = c.lenient(Bool.self, .hasSeenWelcome) ?? d.hasSeenWelcome
     }
@@ -425,6 +431,7 @@ struct Settings: Codable, Hashable {
     static let gifFrameRates = [10, 15, 20, 24]
 
     static let gifWidths = [320, 480, 640, 800]
+    static let keepNextOptions = [0, 1, 2, 3, 5, 10]
 }
 
 extension Settings {

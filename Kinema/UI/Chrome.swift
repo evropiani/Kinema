@@ -50,6 +50,7 @@ struct MainUI: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             graph.updates.checkInBackground()
             graph.downloads.syncWatched()
+            Task { await graph.downloads.keepNextEpisodes() }
         }
         .task { graph.updates.checkInBackground() }
         .animation(theme.ease, value: graph.updates.available?.version)

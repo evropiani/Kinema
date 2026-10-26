@@ -62,8 +62,9 @@ for free.
 - **Downloads** for watching offline, as the original file or a smaller
   copy made by the server, with their subtitles and artwork, several at a
   time, with a floating progress strip. A show's unwatched episodes download
-  in one go, and an icon by each title says whether it's downloaded, whole
-  or in part. What you watch offline is sent to the server once you're
+  in one go, Kinema can keep the next episodes of the shows you're watching
+  downloaded by itself, and an icon by each title says whether it's
+  downloaded, whole or in part. What you watch offline is sent to the server once you're
   back online.
 - **Settings for everything**, modelled on VidHub's: hide spoilers, default
   sorting, a prompt before streaming on mobile data, the maximum cache,

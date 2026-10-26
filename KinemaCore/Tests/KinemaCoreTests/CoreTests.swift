@@ -432,4 +432,27 @@ final class VidHubSettingsTests: XCTestCase {
         let merged = IntroDatabase.merge(server: server, marked: marked, online: online)
         XCTAssertEqual(merged.map(\.id), ["online-recap-1", "s", "marker-outro"])
     }
+
+    func testKeepsTheNextEpisodesAfterTheLastWatched() {
+        func episode(_ season: Int, _ number: Int) -> Item {
+            var item = Item(id: "s\(season)e\(number)", name: "Episode \(number)", type: "Episode")
+            item.parentIndexNumber = season
+            item.indexNumber = number
+            return item
+        }
+        var virtual = episode(2, 3)
+        virtual.locationType = "Virtual"
+        let episodes = [episode(0, 1)] + (1...10).map { episode(1, $0) } + [episode(2, 1), episode(2, 2), virtual]
+        // Watched 1 to 5, and 7 out of order: the next ones come after 7.
+        let watched: Set<String> = ["s1e1", "s1e2", "s1e3", "s1e4", "s1e5", "s1e7"]
+        let keep = NextEpisodes.toKeep(episodes, count: 3, isPlayed: { watched.contains($0.id) })
+        XCTAssertEqual(keep.map(\.id), ["s1e8", "s1e9", "s1e10"])
+        XCTAssertEqual(NextEpisodes.toKeep(episodes, count: 5, isPlayed: { watched.contains($0.id) }).map(\.id), ["s1e8", "s1e9", "s1e10", "s2e1", "s2e2"])
+        XCTAssertEqual(NextEpisodes.toKeep(episodes, count: 2, isPlayed: { _ in false }).map(\.id), ["s1e1", "s1e2"], "specials are left out")
+        XCTAssertTrue(NextEpisodes.toKeep(episodes, count: 0, isPlayed: { _ in false }).isEmpty)
+        XCTAssertTrue(NextEpisodes.toKeep(episodes, count: 3, isPlayed: { _ in true }).isEmpty)
+        let settings = try? JSONDecoder().decode(Settings.self, from: Data(#"{"keepNextEpisodes":3}"#.utf8))
+        XCTAssertEqual(settings?.keepNextEpisodes, 3)
+        XCTAssertEqual(settings?.removeWatchedDownloads, true)
+    }
 }
