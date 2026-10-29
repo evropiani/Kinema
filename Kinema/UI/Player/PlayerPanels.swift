@@ -146,16 +146,31 @@ private struct PanelHeading: View {
 private struct AudioPanel: View {
     var body: some View {
         let player = AppGraph.shared.player
+        // A download the server made holds one language; the others play from the server.
+        let copy = player.offline?.kind == .hls
+        let inDownload = player.downloadedAudioIndex
+        let online = AppGraph.shared.network.online
         VStack(alignment: .leading, spacing: 2) {
             if player.audioStreams.isEmpty {
                 Text("This video has no audio track the server describes.").font(.system(size: 14)).opacity(0.7).padding(12)
             }
             ForEach(player.audioStreams) { stream in
-                PanelRow(title: stream.label, detail: stream.detail, chosen: stream.index == player.audioIndex) {
+                let missing = copy && inDownload != nil && stream.index != inDownload
+                PanelRow(
+                    title: stream.label,
+                    detail: missing ? (online ? "Not in the download · plays from your server" : "Not in the download") : stream.detail,
+                    chosen: stream.index == (copy ? inDownload ?? player.audioIndex : player.audioIndex)
+                ) {
                     player.selectAudio(stream.index)
                 }
+                .opacity(missing && !online ? 0.5 : 1)
             }
-            if player.stream?.method != .directPlay && player.offline == nil && player.audioStreams.count > 1 {
+            if copy && player.audioStreams.count > 1 {
+                Text("The server repackaged this download from a format iOS can't play, and it can put only one language into it. Choose the language when downloading.")
+                    .font(.system(size: 12))
+                    .opacity(0.5)
+                    .padding(12)
+            } else if player.stream?.method != .directPlay && player.offline == nil && player.audioStreams.count > 1 {
                 Text("Changing the language restarts the stream from where you are.")
                     .font(.system(size: 12))
                     .opacity(0.5)

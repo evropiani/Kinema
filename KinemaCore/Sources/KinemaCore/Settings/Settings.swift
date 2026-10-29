@@ -305,6 +305,8 @@ struct Settings: Codable, Hashable {
     var downloadSubtitles = true
     /** Save subtitles added later (found online in the player, or on the server) into downloads too. */
     var saveNewSubtitles = true
+    /** The audio language downloads are made in ("": as for watching, Settings → Playback). */
+    var downloadAudioLanguage = ""
     /** Keep this many of the next episodes downloaded, for every show with downloads (0: off). */
     var keepNextEpisodes = 0
     /** Delete the episodes downloaded that way once they're watched. */
@@ -330,7 +332,7 @@ struct Settings: Codable, Hashable {
         case autoPiP, backgroundAudio, aspect, showRemaining, audioLanguage, subtitleMode, subtitleLanguage, showSkipButtons, showEpisodeButtons
         case subtitleSize, subtitleColor, subtitleOutline, subtitleBackground, subtitleBold, subtitleFont, subtitleMargin, subtitleBrightness
         case secondaryPosition, secondaryScale
-        case downloadQuality, downloadOnCellular, downloadSubtitles, saveNewSubtitles, keepNextEpisodes, removeWatchedDownloads, hasSeenWelcome
+        case downloadQuality, downloadOnCellular, downloadSubtitles, saveNewSubtitles, downloadAudioLanguage, keepNextEpisodes, removeWatchedDownloads, hasSeenWelcome
     }
 
     init(from decoder: Decoder) throws {
@@ -419,6 +421,7 @@ struct Settings: Codable, Hashable {
         downloadOnCellular = c.lenient(Bool.self, .downloadOnCellular) ?? d.downloadOnCellular
         keepNextEpisodes = max(0, c.lenient(Int.self, .keepNextEpisodes) ?? d.keepNextEpisodes)
         saveNewSubtitles = c.lenient(Bool.self, .saveNewSubtitles) ?? d.saveNewSubtitles
+        downloadAudioLanguage = c.lenient(String.self, .downloadAudioLanguage) ?? d.downloadAudioLanguage
         removeWatchedDownloads = c.lenient(Bool.self, .removeWatchedDownloads) ?? d.removeWatchedDownloads
         downloadSubtitles = c.lenient(Bool.self, .downloadSubtitles) ?? d.downloadSubtitles
         hasSeenWelcome = c.lenient(Bool.self, .hasSeenWelcome) ?? d.hasSeenWelcome

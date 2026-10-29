@@ -16,6 +16,27 @@ struct DownloadsScreen: View {
         let series = Dictionary(grouping: done.filter { $0.item.kind == .episode }) { $0.item.seriesId ?? $0.item.seriesName ?? "" }
             .map { (id: $0.key, records: $0.value) }
             .sorted { ($0.records.first?.item.seriesName ?? "") < ($1.records.first?.item.seriesName ?? "") }
+        return VStack(alignment: .leading, spacing: 0) {
+            // The title, with Pause All / Resume All on its right, as in the Library.
+            HStack(alignment: .center, spacing: 12) {
+                Text("Downloads")
+                    .font(KFont.display)
+                    .foregroundStyle(theme.colors.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                if active.contains(where: { $0.state != .failed }) {
+                    Pill(downloads.allPaused ? "Resume All" : "Pause All", icon: downloads.allPaused ? "play.fill" : "pause.fill") {
+                        if downloads.allPaused { downloads.resumeAll() } else { downloads.pauseAll() }
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 10)
+            .animation(theme.ease, value: downloads.allPaused)
+            .animation(theme.ease, value: active.isEmpty)
         List {
             if !graph.network.online {
                 Section {
@@ -31,22 +52,7 @@ struct DownloadsScreen: View {
                         DownloadRow(record: record)
                     }
                 } header: {
-                    HStack {
-                        Text(downloads.allPaused ? "Paused" : downloads.waitingForWiFi ? "Waiting for Wi-Fi" : "Downloading")
-                        Spacer()
-                        if active.contains(where: { $0.state != .failed }) {
-                            Button {
-                                Haptics.tap()
-                                if downloads.allPaused { downloads.resumeAll() } else { downloads.pauseAll() }
-                            } label: {
-                                Label(downloads.allPaused ? "Resume All" : "Pause All", systemImage: downloads.allPaused ? "play.fill" : "pause.fill")
-                                    .font(KFont.labelLarge)
-                                    .textCase(nil)
-                                    .foregroundStyle(theme.colors.accent)
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
+                    Text(downloads.allPaused ? "Paused" : downloads.waitingForWiFi ? "Waiting for Wi-Fi" : "Downloading")
                 } footer: {
                     if downloads.waitingForWiFi {
                         Text("Downloading on mobile data is turned off in Settings → Downloads.")
@@ -110,6 +116,8 @@ struct DownloadsScreen: View {
             }
         }
         .scrollContentBackground(.hidden)
+        }
+        .toolbar(.hidden, for: .navigationBar)
         .navigationTitle("Downloads")
         .kinemaScreen()
         .onAppear { downloads.syncWatched() }
@@ -120,6 +128,21 @@ struct DownloadsScreen: View {
 struct DownloadRow: View {
     @Environment(\.kinema) private var theme
     let record: DownloadRecord
+
+    /** "Original" for the file as it is, "Original, repackaged" for the server's copy of it. */
+    private var qualityText: String {
+        guard record.quality == .original else { return record.quality.label }
+        return record.kind == .hls ? "Original, repackaged" : "Original"
+    }
+
+    /** The one language of a copy the server made. */
+    private var audioText: String? {
+        guard record.kind == .hls, let index = record.audioIndex,
+              let stream = record.item.mediaSources?.first(where: { $0.id == record.mediaSourceId })?.audioStreams.first(where: { $0.index == index }) ?? record.item.primarySource?.audioStreams.first(where: { $0.index == index }),
+              let name = Format.languageName(stream.language)
+        else { return nil }
+        return name
+    }
 
     var body: some View {
         let graph = AppGraph.shared
@@ -148,7 +171,7 @@ struct DownloadRow: View {
                     Text(item.name).font(KFont.titleSmall).foregroundStyle(c.ink).lineLimit(2)
                     switch record.state {
                     case .done:
-                        Text([Format.fileSize(record.bytes), record.quality == .original && record.kind == .original ? "Original" : record.quality.label, record.pendingSync ? "Not synced yet" : nil].compactMap { $0 }.joined(separator: " · "))
+                        Text([Format.fileSize(record.bytes), qualityText, audioText, record.pendingSync ? "Not synced yet" : nil].compactMap { $0 }.joined(separator: " · "))
                             .font(KFont.bodySmall)
                             .foregroundStyle(c.ink3)
                     case .failed:
@@ -213,6 +236,11 @@ struct DownloadRow: View {
             }
             if graph.auth.client != nil && graph.network.online {
                 Button { graph.actions.open(item) } label: { Label("Details", systemImage: "info.circle") }
+                if record.isDone && record.kind == .hls && (record.item.primarySource?.audioStreams.count ?? 0) > 1 {
+                    Button { graph.actions.download([item], replacing: true) } label: {
+                        Label("Download in Another Language", systemImage: "waveform")
+                    }
+                }
                 if record.isDone {
                     Button {
                         Task {
@@ -254,16 +282,22 @@ struct DownloadedSeriesScreen: View {
     }
 }
 
-/** Before downloading: the quality, with what each means. */
+/** Before downloading: the quality, with what each means, and the audio language where it matters. */
 struct DownloadOptionsSheet: View {
     @Environment(\.kinema) private var theme
     let items: [Item]
+    var replacing = false
     let onDone: () -> Void
     @State private var quality: DownloadQuality = AppGraph.shared.settings.settings.downloadQuality
+    @State private var audio: String = AppGraph.shared.settings.settings.downloadAudioLanguage
 
     var body: some View {
         let c = theme.colors
         let runtime = items.reduce(0) { $0 + $1.runtime }
+        let languages = DownloadAudio.languages(items)
+        // The original file keeps every language; a copy the server makes (MKV and the like, or a lower quality) keeps one.
+        let copies = items.filter { quality != .original || !($0.primarySource.map(StreamResolver.offlinePlayable) ?? false) }
+        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             Text(items.count == 1 ? "Download “\(items[0].name)”" : "Download \(Format.count(items.count, "episode"))")
                 .font(KFont.titleLarge)
@@ -292,13 +326,52 @@ struct DownloadOptionsSheet: View {
                     .buttonStyle(PressableStyle())
                 }
             }
-            WideGlassButton(title: "Download", icon: "arrow.down.circle.fill", prominent: true) {
-                AppGraph.shared.downloads.download(items, quality: quality)
+            if languages.count > 1 && !copies.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Audio").font(KFont.titleSmall).foregroundStyle(c.ink)
+                        Spacer()
+                        Menu {
+                            Picker("Audio", selection: $audio) {
+                                Text("Usual language").tag("")
+                                ForEach(languages, id: \.self) { code in
+                                    Text(Format.languageName(code) ?? code).tag(code)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(audio.isEmpty ? "Usual language" : Format.languageName(audio) ?? audio)
+                                Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .semibold))
+                            }
+                            .font(KFont.labelLarge)
+                            .foregroundStyle(c.accent)
+                        }
+                    }
+                    Text(copies.count == items.count
+                         ? "The server repackages \(items.count == 1 ? "this file" : "these files") for iOS, and its copy keeps one language."
+                         : "\(Format.count(copies.count, "file")) of these are repackaged by the server, keeping one language; the others keep them all.")
+                        .font(KFont.bodySmall)
+                        .foregroundStyle(c.ink3)
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: theme.radii.sm, style: .continuous).fill(c.glassStrong))
+            }
+            WideGlassButton(title: replacing ? "Download Again" : "Download", icon: "arrow.down.circle.fill", prominent: true) {
+                let graph = AppGraph.shared
+                if languages.count > 1 { graph.settings.update { $0.downloadAudioLanguage = audio } }
+                if replacing { for item in items { graph.downloads.remove(item.id) } }
+                graph.downloads.download(items, quality: quality, audioLanguage: audio)
                 onDone()
             }
         }
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear {
+            // A language these files don't have falls back to the usual one.
+            let languages = DownloadAudio.languages(items)
+            if !audio.isEmpty && !languages.isEmpty && !languages.contains(where: { Languages.same($0, audio) }) { audio = "" }
+        }
     }
 
     private func hint(_ option: DownloadQuality, runtime: Double) -> String {

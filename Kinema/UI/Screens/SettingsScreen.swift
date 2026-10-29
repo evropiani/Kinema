@@ -790,10 +790,14 @@ private struct DownloadsPage: View {
                 Picker("Quality", selection: setting(\.downloadQuality)) {
                     ForEach(DownloadQuality.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
+                Picker("Audio language", selection: setting(\.downloadAudioLanguage)) {
+                    Text("As for watching").tag("")
+                    ForEach(Languages.common, id: \.0) { Text($0.1).tag($0.0) }
+                }
                 Toggle("Save subtitles with downloads", isOn: setting(\.downloadSubtitles))
                 Toggle("Add subtitles found later", isOn: setting(\.saveNewSubtitles))
             } footer: {
-                Text("Original keeps the file as it is (repackaged by the server when iOS can't play its format). The other qualities are converted by the server and take less space. Subtitles found later, online in the player or added on the server, are saved with a download the next time it's played with a connection.")
+                Text("Original keeps the file as it is, with all its languages. Files iOS can't play as they are (MKV and the like) are repackaged by the server, and its copy keeps one language: the one chosen here or when downloading. The other qualities are converted by the server and take less space. Subtitles found later, online in the player or added on the server, are saved with a download the next time it's played with a connection.")
             }
             Section {
                 Picker("Keep the next episodes", selection: Binding(

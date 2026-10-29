@@ -455,4 +455,37 @@ final class VidHubSettingsTests: XCTestCase {
         XCTAssertEqual(settings?.keepNextEpisodes, 3)
         XCTAssertEqual(settings?.removeWatchedDownloads, true)
     }
+
+    func testOffersTheAudioLanguagesOfADownload() throws {
+        func episode(_ id: String, _ languages: [String]) throws -> Item {
+            let streams = languages.enumerated().map { #"{"Type":"Audio","Index":\#($0.offset + 1),"Language":"\#($0.element)","Codec":"aac"}"# }.joined(separator: ",")
+            let json = #"{"Id":"\#(id)","Name":"E","Type":"Episode","MediaSources":[{"Id":"s","Container":"mkv","MediaStreams":[\#(streams)]}]}"#
+            return try JSONDecoder().decode(Item.self, from: Data(json.utf8))
+        }
+        let items = [try episode("1", ["jpn", "eng"]), try episode("2", ["ja", "en", "ger"]), try episode("3", ["jpn"])]
+        XCTAssertEqual(DownloadAudio.languages(items), ["jpn", "eng", "deu"])
+        XCTAssertEqual(StreamResolver.audioIndex(try XCTUnwrap(items[1].primarySource), language: "eng"), 2)
+        XCTAssertEqual(DownloadAudio.wanted("", watching: "", server: "eng"), "eng")
+        XCTAssertEqual(DownloadAudio.wanted("jpn", watching: "eng", server: nil), "jpn")
+        XCTAssertNil(DownloadAudio.wanted(nil, watching: "", server: nil))
+    }
+
+    func testFollowsTracksWhenTheServerNumbersThemAgain() throws {
+        func source(_ streams: String) throws -> MediaSource {
+            try JSONDecoder().decode(MediaSource.self, from: Data(#"{"Id":"s","Container":"mkv","MediaStreams":[\#(streams)]}"#.utf8))
+        }
+        let before = try source(#"""
+        {"Type":"Video","Index":0,"Codec":"h264"},{"Type":"Audio","Index":1,"Language":"jpn","Codec":"aac"},{"Type":"Audio","Index":2,"Language":"eng","Codec":"aac"},
+        {"Type":"Subtitle","Index":3,"Language":"eng","Codec":"ass"},{"Type":"Subtitle","Index":4,"Language":"ger","Codec":"subrip","IsExternal":true}
+        """#)
+        // A subtitle found online: the separate files come first, and everything is numbered again.
+        let after = try source(#"""
+        {"Type":"Subtitle","Index":0,"Language":"spa","Codec":"subrip","IsExternal":true},{"Type":"Subtitle","Index":1,"Language":"ger","Codec":"subrip","IsExternal":true},
+        {"Type":"Video","Index":2,"Codec":"h264"},{"Type":"Audio","Index":3,"Language":"jpn","Codec":"aac"},{"Type":"Audio","Index":4,"Language":"eng","Codec":"aac"},
+        {"Type":"Subtitle","Index":5,"Language":"eng","Codec":"ass"}
+        """#)
+        let map = StreamRemap.indexMap(from: before.streams, to: after.streams)
+        XCTAssertEqual(map, [0: 2, 1: 3, 2: 4, 3: 5, 4: 1])
+        XCTAssertNil(map.values.first { $0 == 0 }, "the new subtitle is new")
+    }
 }

@@ -171,12 +171,12 @@ final class DownloadManager: NSObject {
 
     // ---------------------------------------------------------- downloading --
 
-    /** Download [items] at [quality]. */
-    func download(_ items: [Item], quality: DownloadQuality) {
+    /** Download [items] at [quality], in [audioLanguage] where the server makes a copy ("": the usual one). */
+    func download(_ items: [Item], quality: DownloadQuality, audioLanguage: String = "") {
         if graph.network.metered && !graph.settings.settings.downloadOnCellular {
             graph.messages.show("Downloads wait for Wi-Fi (change this in Settings → Downloads).")
         }
-        let added = enqueue(items, quality: quality, automatic: false)
+        let added = enqueue(items, quality: quality, automatic: false, audioLanguage: audioLanguage)
         if added > 0 {
             graph.messages.show(added == 1 ? "Downloading “\(items.first?.name ?? "")”" : "Downloading \(added) episodes", .success)
         } else {
@@ -188,7 +188,7 @@ final class DownloadManager: NSObject {
 
     /** Queue the ones of [items] not downloaded yet; how many were. */
     @discardableResult
-    private func enqueue(_ items: [Item], quality: DownloadQuality, automatic: Bool) -> Int {
+    private func enqueue(_ items: [Item], quality: DownloadQuality, automatic: Bool, audioLanguage: String) -> Int {
         guard let profile = graph.auth.activeId else { return 0 }
         var added = 0
         for item in items where item.isPlayable {
@@ -196,6 +196,7 @@ final class DownloadManager: NSObject {
             var record = DownloadRecord(id: item.id, profileId: profile, item: item, mediaSourceId: item.primarySource?.id, kind: .original, quality: quality)
             record.state = .queued
             record.automatic = automatic ? true : nil
+            record.audioLanguage = audioLanguage.isEmpty ? nil : audioLanguage
             all.append(record)
             added += 1
             // Its intro and credits, kept for watching offline.
@@ -243,7 +244,7 @@ final class DownloadManager: NSObject {
                 }
             }
         }
-        enqueue(wanted, quality: settings.downloadQuality, automatic: true)
+        enqueue(wanted, quality: settings.downloadQuality, automatic: true, audioLanguage: settings.downloadAudioLanguage)
     }
 
     /** Start queued downloads, as many at once as Settings → Downloads allows. */
@@ -278,10 +279,14 @@ final class DownloadManager: NSObject {
                 $0.cellularAllowed = cellular
             }
             let description = Self.describe(id, token)
+            // The server's copy can hold one audio track: the language asked for, else the usual one.
+            let language = DownloadAudio.wanted(record.audioLanguage, watching: graph.settings.settings.audioLanguage, server: graph.auth.user?.configuration?.audioLanguagePreference)
+            let audio = source.flatMap { StreamResolver.audioIndex($0, language: language) }
             if original, let source, StreamResolver.offlinePlayable(source), let url = client.downloadURL(itemId: id) {
                 update(id) {
                     $0.kind = .original
                     $0.expectedBytes = source.size
+                    $0.audioIndex = nil
                 }
                 var request = URLRequest(url: url)
                 request.setValue(client.authorization, forHTTPHeaderField: "Authorization")
@@ -297,7 +302,7 @@ final class DownloadManager: NSObject {
                 let profile = DeviceProfileBuilder.build(DeviceSupport.capabilities, maxBitrate: bitrate, allowDirectPlay: false)
                 let response = try await client.playbackInfo(id, PlaybackInfoRequest(
                     userId: client.userId ?? "", maxStreamingBitrate: bitrate, startTimeTicks: 0,
-                    audioStreamIndex: source.flatMap { StreamResolver.audioIndex($0, language: graph.settings.settings.audioLanguage) },
+                    audioStreamIndex: audio,
                     subtitleStreamIndex: -1, mediaSourceId: source?.id, deviceProfile: profile,
                     enableDirectPlay: false, enableDirectStream: true, enableTranscoding: true,
                     allowVideoStreamCopy: original, allowAudioStreamCopy: original, autoOpenLiveStream: true,
@@ -320,6 +325,7 @@ final class DownloadManager: NSObject {
                 update(id) {
                     $0.kind = .hls
                     $0.expectedBytes = Int64(Double(bitrate) / 8 * item.runtime)
+                    $0.audioIndex = audio
                 }
                 launch(task, id)
             }
@@ -588,7 +594,15 @@ final class DownloadManager: NSObject {
               let record = record(id), record.isDone, let fresh = try? await client.item(id),
               let source = fresh.mediaSources?.first(where: { $0.id == record.mediaSourceId }) ?? fresh.primarySource
         else { return nil }
-        let have = Set(record.subtitles.map(\.index))
+        // The server numbers tracks again when a subtitle is added: carry the kept ones over first.
+        let before = record.item.mediaSources?.first(where: { $0.id == record.mediaSourceId }) ?? record.item.primarySource
+        let map = StreamRemap.indexMap(from: before?.streams ?? [], to: source.streams)
+        let kept = record.subtitles.map { subtitle -> DownloadedSubtitle in
+            var moved = subtitle
+            moved.index = map[subtitle.index] ?? subtitle.index
+            return moved
+        }
+        let have = Set(kept.map(\.index))
         var added: [DownloadedSubtitle] = []
         for stream in source.subtitleStreams where !stream.isImageSubtitle && !have.contains(stream.index) {
             let name = "\(id)-sub-\(stream.index).srt"
@@ -602,7 +616,8 @@ final class DownloadManager: NSObject {
         // The fresh details list the new tracks, so the player offers them.
         update(id) {
             $0.item = fresh
-            $0.subtitles += added
+            $0.subtitles = kept + added
+            $0.audioIndex = $0.audioIndex.map { map[$0] ?? $0 }
         }
         guard let updated = self.record(id) else { return nil }
         return (updated, added.count)

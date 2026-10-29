@@ -59,9 +59,9 @@ struct MainUI: View {
                 .environment(\.kinema, theme)
         }
         .sheet(isPresented: Binding(get: { ui.downloadPrompt != nil }, set: { if !$0 { ui.downloadPrompt = nil } })) {
-            DownloadOptionsSheet(items: ui.downloadPrompt ?? []) { ui.downloadPrompt = nil }
+            DownloadOptionsSheet(items: ui.downloadPrompt ?? [], replacing: ui.downloadReplaces) { ui.downloadPrompt = nil }
                 .environment(\.kinema, theme)
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
                 .presentationBackground(.regularMaterial)
         }
         .confirmationDialog(

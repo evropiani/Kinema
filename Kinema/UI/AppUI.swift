@@ -87,6 +87,8 @@ final class AppUI {
     var resumePrompt: Item?
     /** Choosing what to download (quality) for these items. */
     var downloadPrompt: [Item]?
+    /** The download asked for replaces the one there (another language). */
+    var downloadReplaces = false
     /** About to stream on mobile data (Settings → General). */
     var cellularPrompt: PendingPlay?
 
@@ -261,13 +263,17 @@ final class AppActions {
         }
     }
 
-    /** Download [items] (a film, episodes, a season), asking for the quality first. */
-    func download(_ items: [Item]) {
+    /**
+     * Download [items] (a film, episodes, a season), asking for the quality
+     * and language first; with [replacing], instead of the download there.
+     */
+    func download(_ items: [Item], replacing: Bool = false) {
         guard !items.isEmpty else { return }
         guard graph.auth.canDownload else {
             messages.error("Your account isn't allowed to download from this server.")
             return
         }
+        ui.downloadReplaces = replacing
         ui.downloadPrompt = items
     }
 

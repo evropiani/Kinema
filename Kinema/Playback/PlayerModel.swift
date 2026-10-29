@@ -172,7 +172,8 @@ final class PlayerModel: NSObject {
         offline = record
         startPosition = Ticks.seconds(startTicks ?? record.resumeTicks)
         let settings = graph.settings.settings
-        audioIndex = nil
+        // A copy made by the server has one language; the original file has them all.
+        audioIndex = record.kind == .hls ? record.audioIndex : nil
         let source = record.item.mediaSources?.first { $0.id == record.mediaSourceId } ?? record.item.primarySource
         stream = source.map { ResolvedStream(url: url, method: .directPlay, source: $0, playSessionId: nil) }
         // Subtitles saved with the download, chosen the usual way.
@@ -193,10 +194,7 @@ final class PlayerModel: NSObject {
         guard let refreshed = await graph.downloads.refreshSubtitles(id), refreshed.added > 0, offline?.id == id else { return }
         offline = refreshed.record
         item = refreshed.record.item
-        if var current = stream, let updated = refreshed.record.item.mediaSources?.first(where: { $0.id == current.source.id }) {
-            current.source = updated
-            stream = current
-        }
+        if let updated = refreshed.record.item.mediaSources?.first(where: { $0.id == stream?.source.id }) { adopt(updated) }
         graph.messages.show(refreshed.added == 1 ? "1 new subtitle saved with the download" : "\(refreshed.added) new subtitles saved with the download")
     }
 
@@ -705,28 +703,106 @@ final class PlayerModel: NSObject {
 
     func selectAudio(_ index: Int) {
         guard index != audioIndex else { return }
-        audioIndex = index
-        if stream?.method == .directPlay || offline != nil {
-            if applyAudioSelection() { return }
-            if offline != nil { return }
+        if let offline {
+            if offline.kind == .hls {
+                // A copy made by the server holds one language.
+                if index == downloadedAudioIndex { audioIndex = index } else { playAudioFromServer(index) }
+                return
+            }
+            let previous = audioIndex
+            audioIndex = index
+            if !applyAudioSelection() {
+                audioIndex = previous
+                playAudioFromServer(index)
+            }
+            return
         }
+        audioIndex = index
+        if stream?.method == .directPlay, applyAudioSelection() { return }
         reload(audio: index)
     }
 
     /**
-     * Switch the language inside the file, when it is played as it is: the
-     * nth audio track of the source is the nth audible option of the asset.
+     * Switch the language inside the file, when it is played as it is: by
+     * the file's own list of languages where it has one (by language, else
+     * the nth audio track the server lists is the nth option), else by
+     * turning its audio tracks on and off (files that don't group them).
      */
     @discardableResult
     private func applyAudioSelection() -> Bool {
         guard let audioIndex, let playerItem = player.currentItem,
-              stream?.method == .directPlay || offline != nil,
-              let group = playerItem.asset.mediaSelectionGroup(forMediaCharacteristic: .audible)
+              stream?.method == .directPlay || offline != nil
         else { return false }
         let streams = audioStreams.sorted { $0.index < $1.index }
-        guard let position = streams.firstIndex(where: { $0.index == audioIndex }), group.options.count == streams.count else { return false }
-        playerItem.select(group.options[position], in: group)
+        guard let position = streams.firstIndex(where: { $0.index == audioIndex }) else { return false }
+        let chosen = streams[position]
+        if let group = playerItem.asset.mediaSelectionGroup(forMediaCharacteristic: .audible), group.options.count > 1 {
+            let options = group.options
+            let sameLanguage = options.filter { Languages.same($0.extendedLanguageTag ?? $0.locale?.identifier, chosen.language) }
+            let streamsInLanguage = streams.filter { Languages.same($0.language, chosen.language) }
+            var option: AVMediaSelectionOption?
+            if sameLanguage.count == 1 && streamsInLanguage.count == 1 {
+                option = sameLanguage[0]
+            } else if options.count == streams.count {
+                option = options[position]
+            } else if !sameLanguage.isEmpty, let nth = streamsInLanguage.firstIndex(where: { $0.index == audioIndex }) {
+                option = sameLanguage[min(nth, sameLanguage.count - 1)]
+            }
+            if let option {
+                playerItem.select(option, in: group)
+                return true
+            }
+        }
+        let tracks = playerItem.tracks.filter { $0.assetTrack?.mediaType == .audio }
+        guard tracks.count > 1, tracks.count == streams.count else { return false }
+        for (i, track) in tracks.enumerated() { track.isEnabled = i == position }
         return true
+    }
+
+    /**
+     * The one audio track of a download the server made (HLS): as kept when
+     * it was downloaded, or for older downloads, by the copy's language.
+     */
+    var downloadedAudioIndex: Int? {
+        guard let offline, offline.kind == .hls else { return nil }
+        if let index = offline.audioIndex { return index }
+        if let option = player.currentItem?.asset.mediaSelectionGroup(forMediaCharacteristic: .audible)?.options.first,
+           let tag = option.extendedLanguageTag ?? option.locale?.identifier,
+           let match = audioStreams.first(where: { Languages.same($0.language, tag) }) {
+            return match.index
+        }
+        // Chosen the way downloads chose it before the language was kept.
+        return source.flatMap { StreamResolver.audioIndex($0, language: graph.settings.settings.audioLanguage) }
+    }
+
+    /**
+     * The server's fresh list of tracks for what's playing. It numbers them
+     * again when a subtitle is added, so the chosen tracks are carried over.
+     */
+    private func adopt(_ updated: MediaSource) {
+        guard var current = stream else { return }
+        let map = StreamRemap.indexMap(from: current.source.streams, to: updated.streams)
+        if let index = audioIndex { audioIndex = map[index] ?? index }
+        if let index = subtitleIndex { subtitleIndex = map[index] ?? index }
+        if let index = secondaryIndex { secondaryIndex = map[index] ?? index }
+        current.source = updated
+        stream = current
+    }
+
+    /** A language the download doesn't have: from the server instead, from here on, when there's a connection. */
+    private func playAudioFromServer(_ index: Int) {
+        let name = audioStreams.first { $0.index == index }?.label ?? "That language"
+        guard let item, graph.network.online, graph.auth.client != nil else {
+            graph.messages.show("\(name) isn't in this download. Play it with a connection, or download it again in \(name).")
+            return
+        }
+        let position = clock.position
+        let sourceId = offline?.mediaSourceId
+        let subtitle = subtitleIndex
+        graph.messages.show("\(name) isn't in the download, so it plays from your server")
+        begin(item)
+        startPosition = position
+        loadTask = Task { await self.load(item, sourceId: sourceId, at: position, audio: index, subtitle: .some(subtitle)) }
     }
 
     func selectSubtitle(_ index: Int?) {
@@ -788,18 +864,18 @@ final class PlayerModel: NSObject {
     /** The server found a subtitle online; show it once the server has it (and keep it with the download, if there is one). */
     func remoteSubtitleDownloaded() async {
         guard let client = graph.auth.client, let item, let full = try? await client.item(item.id) else { return }
-        let before = Set(subtitleStreams.map(\.index))
+        let oldStreams = source?.streams ?? []
         // Playing the download, it's what was asked for, whatever the setting.
         if let refreshed = await graph.downloads.refreshSubtitles(item.id, force: offline?.id == item.id), offline?.id == item.id {
             offline = refreshed.record
         }
         guard self.item?.id == full.id else { return }
         self.item = full
-        if var current = stream, let updated = full.mediaSources?.first(where: { $0.id == current.source.id }) {
-            current.source = updated
-            stream = current
-        }
-        if let added = subtitleStreams.first(where: { !before.contains($0.index) && !$0.isImageSubtitle }) {
+        if let updated = full.mediaSources?.first(where: { $0.id == stream?.source.id }) { adopt(updated) }
+        // The server numbered the tracks again: the new one is the one that maps to nothing before.
+        let map = StreamRemap.indexMap(from: oldStreams, to: source?.streams ?? [])
+        let known = Set(map.values)
+        if let added = subtitleStreams.first(where: { !known.contains($0.index) && !$0.isImageSubtitle }) {
             selectSubtitle(added.index)
             graph.messages.show("Showing \(added.label)", .success)
         }

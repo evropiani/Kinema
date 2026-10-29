@@ -55,6 +55,14 @@ struct DownloadRecord: Codable, Hashable, Identifiable {
     var taskToken: String?
     /** Whether that task may use mobile data (Settings → Downloads, when it was started). */
     var cellularAllowed: Bool?
+    /** The audio language asked for ("" or nil: the usual one, Settings → Playback). */
+    var audioLanguage: String?
+    /**
+     * The one audio track in a copy made by the server (HLS); the server
+     * can't put more than one in. Nil for the original file, which has them
+     * all, and for downloads made before this was kept.
+     */
+    var audioIndex: Int?
 
     /** Watched offline and not yet told to the server. */
     var localPositionTicks: Int64?
