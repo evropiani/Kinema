@@ -162,6 +162,30 @@ enum ScreenshotDriver {
         case "downloads":
             actions.selectTab(.downloads)
             return nil
+        case "downloads-paused":
+            // Two downloads paused and one going, for the pause buttons.
+            var query = ItemQuery(includeTypes: ["Movie"])
+            query.limit = 3
+            let movies = (try? await client?.items(query).items) ?? []
+            graph.downloads.pretendDownloaded(Array(movies.prefix(1)), state: .downloading, progress: 0.42)
+            graph.downloads.pretendDownloaded(Array(movies.dropFirst().prefix(2)), state: .paused, progress: 0.17)
+            actions.selectTab(.downloads)
+            return nil
+        case "player-portrait":
+            actions.selectTab(.home)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if let movie = await first(["Movie"], backdrop: true) {
+                graph.player.open(movie, startTicks: Ticks.from(300), mediaSourceId: nil)
+            }
+            Task { @MainActor in
+                await waitFor("player", seconds: 40)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                graph.player.toggleOrientation()
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                graph.player.pause()
+                graph.player.controlsVisible = true
+            }
+            return "player"
         case "player", "player-controls":
             actions.selectTab(.home)
             try? await Task.sleep(nanoseconds: 1_000_000_000)

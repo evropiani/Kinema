@@ -8,6 +8,8 @@ import Observation
 final class NetworkMonitor {
     private(set) var online = true
     private(set) var metered = false
+    /** Whether the system has said what the connection is yet (it does a moment after launch). */
+    private(set) var known = false
 
     @ObservationIgnored private let monitor = NWPathMonitor()
     @ObservationIgnored private var listeners: [() -> Void] = []
@@ -21,9 +23,10 @@ final class NetworkMonitor {
             let metered = path.isExpensive || path.isConstrained
             DispatchQueue.main.async {
                 guard let self else { return }
-                let changed = self.online != online || self.metered != metered
+                let changed = self.online != online || self.metered != metered || !self.known
                 self.online = online
                 self.metered = metered
+                self.known = true
                 if changed { self.listeners.forEach { $0() } }
             }
         }

@@ -516,7 +516,9 @@ struct DownloadIndicator: View {
                         Circle().trim(from: 0, to: progress).stroke(theme.colors.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-90))
                     }
                     .frame(width: 20, height: 20)
-                    Text(running.isEmpty ? "\(active.count) waiting to download" : "Downloading \(running.count == 1 ? "“\(running[0].item.name)”" : "\(running.count)") · \(Int(progress * 100))%")
+                    Text(running.isEmpty
+                         ? (graph.downloads.allPaused ? "\(active.count) paused" : graph.downloads.waitingForWiFi ? "\(active.count) waiting for Wi-Fi" : "\(active.count) waiting to download")
+                         : "Downloading \(running.count == 1 ? "“\(running[0].item.name)”" : "\(running.count)") · \(Int(progress * 100))%")
                         .font(KFont.labelLarge)
                         .foregroundStyle(theme.colors.ink)
                         .lineLimit(1)

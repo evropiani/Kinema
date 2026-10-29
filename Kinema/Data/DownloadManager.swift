@@ -31,7 +31,8 @@ final class DownloadManager: NSObject {
     @ObservationIgnored private var fileSession: URLSession!
     @ObservationIgnored private var hlsSession: AVAssetDownloadURLSession!
     /** Which download each task is for. */
-    @ObservationIgnored private var tasks: [Int: String] = [:]
+    /** The downloads with a background task, running or held. */
+    @ObservationIgnored private var liveTasks: Set<String> = []
     @ObservationIgnored private var started = false
 
     private static let indexName = "downloads.json"
@@ -66,6 +67,7 @@ final class DownloadManager: NSObject {
         loadIndex()
         reload()
         reattach()
+        graph.network.observe { [weak self] in self?.connectionChanged() }
     }
 
     // ------------------------------------------------------------ the index --
@@ -92,12 +94,14 @@ final class DownloadManager: NSObject {
     }
 
     #if DEBUG
-    /** For CI's screenshots only: show [items] as downloaded, in memory (no files, nothing saved). */
-    func pretendDownloaded(_ items: [Item]) {
+    /** For CI's screenshots only: show [items] as downloaded (or in [state]), in memory (no files, nothing saved). */
+    func pretendDownloaded(_ items: [Item], state: DownloadState = .done, progress: Double = 1) {
         guard let profile = graph.auth.activeId else { return }
         for item in items where !records.contains(where: { $0.id == item.id }) {
             var record = DownloadRecord(id: item.id, profileId: profile, item: item, mediaSourceId: nil, kind: .original, quality: .original)
-            record.state = .done
+            record.state = state
+            record.progress = progress
+            record.bytes = state == .done ? 0 : Int64(progress * 900_000_000)
             records.append(record)
         }
     }
@@ -246,9 +250,7 @@ final class DownloadManager: NSObject {
     private func pump() {
         let limit = max(1, min(5, graph.settings.settings.concurrentDownloads))
         let running = all.filter { $0.state == .downloading }.count
-        guard running < limit, !pausedForPlayback else { return }
-        guard graph.network.online else { return }
-        if graph.network.metered && !graph.settings.settings.downloadOnCellular { return }
+        guard running < limit, !pausedForPlayback, connectionAllows else { return }
         let queued = all.filter { $0.state == .queued && $0.profileId == graph.auth.activeId }.prefix(limit - running)
         for record in queued {
             update(record.id) { $0.state = .downloading; $0.error = nil }
@@ -268,6 +270,14 @@ final class DownloadManager: NSObject {
             }
             await saveExtras(item, source: source, id: id)
             let original = record.quality == .original
+            // Mobile data is also refused by the system itself, for when Kinema isn't running.
+            let cellular = graph.settings.settings.downloadOnCellular
+            let token = UUID().uuidString
+            update(id) {
+                $0.taskToken = token
+                $0.cellularAllowed = cellular
+            }
+            let description = Self.describe(id, token)
             if original, let source, StreamResolver.offlinePlayable(source), let url = client.downloadURL(itemId: id) {
                 update(id) {
                     $0.kind = .original
@@ -275,10 +285,12 @@ final class DownloadManager: NSObject {
                 }
                 var request = URLRequest(url: url)
                 request.setValue(client.authorization, forHTTPHeaderField: "Authorization")
+                request.allowsCellularAccess = cellular
+                request.allowsExpensiveNetworkAccess = cellular
                 let task = fileSession.downloadTask(with: request)
-                task.taskDescription = id
-                tasks[task.taskIdentifier] = id
-                task.resume()
+                task.taskDescription = description
+                liveTasks.insert(id)
+                launch(task, id)
             } else {
                 // Repackaged (Original) or converted (the lower qualities) by the server, as HLS.
                 let bitrate = record.quality.maxBitrate ?? StreamingQuality.maximum
@@ -294,19 +306,22 @@ final class DownloadManager: NSObject {
                 guard let stream = StreamResolver.resolve(response, itemId: id, sourceId: source?.id, client: client), stream.isHLS else {
                     throw JellyfinError.server(0, "The server didn't offer a stream to download.")
                 }
-                let asset = AVURLAsset(url: stream.url)
+                let asset = AVURLAsset(url: stream.url, options: [
+                    AVURLAssetAllowsCellularAccessKey: cellular,
+                    AVURLAssetAllowsExpensiveNetworkAccessKey: cellular,
+                ])
                 var options: [String: Any] = [:]
                 options[AVAssetDownloadTaskMinimumRequiredMediaBitrateKey] = min(bitrate, 200_000_000)
                 guard let task = hlsSession.makeAssetDownloadTask(asset: asset, assetTitle: item.name, assetArtworkData: nil, options: options) else {
                     throw JellyfinError.server(0, "Couldn't start the download.")
                 }
-                task.taskDescription = id
-                tasks[task.taskIdentifier] = id
+                task.taskDescription = description
+                liveTasks.insert(id)
                 update(id) {
                     $0.kind = .hls
                     $0.expectedBytes = Int64(Double(bitrate) / 8 * item.runtime)
                 }
-                task.resume()
+                launch(task, id)
             }
         } catch {
             update(id) {
@@ -348,40 +363,65 @@ final class DownloadManager: NSObject {
 
     /** Find the background tasks still running from before the app was closed. */
     private func reattach() {
-        fileSession.getAllTasks { tasks in
-            Task { @MainActor in
-                for task in tasks { if let id = task.taskDescription { self.tasks[task.taskIdentifier] = id } }
-                self.recoverOrphans(running: Set(tasks.compactMap(\.taskDescription)))
+        forEachTask { tasks in
+            let current = tasks.filter { task, id, token in
+                guard let record = self.all.first(where: { $0.id == id }), !record.isDone,
+                      token == nil || record.taskToken == nil || token == record.taskToken else {
+                    // Left over from a download that was deleted or started again.
+                    task.cancel()
+                    return false
+                }
+                return true
             }
-        }
-        hlsSession.getAllTasks { tasks in
-            Task { @MainActor in
-                for task in tasks { if let id = task.taskDescription { self.tasks[task.taskIdentifier] = id } }
-                self.recoverOrphans(running: Set(tasks.compactMap(\.taskDescription)))
+            self.liveTasks = Set(current.map { $0.1 })
+            // Anything "downloading" with no task is queued again.
+            for record in self.all where record.state == .downloading && !self.liveTasks.contains(record.id) {
+                self.update(record.id) { $0.state = .queued }
             }
+            self.applyTaskStates()
+            self.pump()
         }
     }
 
-    @ObservationIgnored private var reattached = 0
+    /** "id" alone (older versions) or "id", a line break and the task's token. */
+    private static func describe(_ id: String, _ token: String) -> String { "\(id)\n\(token)" }
 
-    private func recoverOrphans(running: Set<String>) {
-        reattached += 1
-        // Both sessions have answered: anything "downloading" with no task is queued again.
-        guard reattached == 2 else { return }
-        let live = Set(tasks.values).union(running)
-        for record in all where record.state == .downloading && !live.contains(record.id) {
-            update(record.id) { $0.state = .queued }
+    nonisolated fileprivate static func parse(_ description: String?) -> (id: String, token: String?)? {
+        guard let description, !description.isEmpty else { return nil }
+        let parts = description.split(separator: "\n", maxSplits: 1).map(String.init)
+        return (parts[0], parts.count > 1 ? parts[1] : nil)
+    }
+
+    /** Whether news from the task named [token] is about the download as it is now. */
+    private func isCurrent(_ id: String, _ token: String?) -> Bool {
+        guard let record = all.first(where: { $0.id == id }) else { return false }
+        return token == nil || record.taskToken == nil || token == record.taskToken
+    }
+
+    /** Every background task of both sessions, with the download each is for. */
+    private func forEachTask(_ body: @escaping @MainActor ([(URLSessionTask, String, String?)]) -> Void) {
+        let sessions = [fileSession as URLSession?, hlsSession as URLSession?].compactMap { $0 }
+        Task {
+            var found: [(URLSessionTask, String, String?)] = []
+            for session in sessions {
+                for task in await session.allTasks {
+                    if let parsed = Self.parse(task.taskDescription) { found.append((task, parsed.id, parsed.token)) }
+                }
+            }
+            body(found)
         }
-        pump()
+    }
+
+    /** Set a new task going, unless it has to wait (paused, a video playing, or mobile data). */
+    private func launch(_ task: URLSessionTask, _ id: String) {
+        if connectionAllows && !pausedForPlayback && all.first(where: { $0.id == id })?.state == .downloading {
+            task.resume()
+        }
     }
 
     func remove(_ id: String) {
         guard let record = all.first(where: { $0.id == id && $0.profileId == graph.auth.activeId }) ?? all.first(where: { $0.id == id }) else { return }
-        for (identifier, taskId) in tasks where taskId == id {
-            fileSession.getAllTasks { all in all.first { $0.taskIdentifier == identifier }?.cancel() }
-            hlsSession.getAllTasks { all in all.first { $0.taskIdentifier == identifier }?.cancel() }
-        }
-        tasks = tasks.filter { $0.value != id }
+        cancelTasks(of: id)
         deleteFiles(record)
         all.removeAll { $0.id == id && $0.profileId == record.profileId }
         save()
@@ -395,21 +435,121 @@ final class DownloadManager: NSObject {
     func pauseForPlayback(_ paused: Bool) {
         guard paused != pausedForPlayback, started else { return }
         pausedForPlayback = paused
-        for session in [fileSession as URLSession?, hlsSession as URLSession?].compactMap({ $0 }) {
-            session.getAllTasks { tasks in
-                for task in tasks {
-                    if paused { task.suspend() } else { task.resume() }
-                }
-            }
-        }
+        applyTaskStates()
         if !paused { pump() }
     }
 
+    // ---------------------------------------------------- pausing, mobile data --
+
+    /** Whether downloads may use the connection there is now (Settings → Downloads → Download on mobile data). */
+    var connectionAllows: Bool {
+        let network = graph.network
+        return network.known && network.online && (!network.metered || graph.settings.settings.downloadOnCellular)
+    }
+
+    /** Waiting for Wi-Fi: on mobile data with downloading on it turned off. */
+    var waitingForWiFi: Bool {
+        graph.network.known && graph.network.online && graph.network.metered && !graph.settings.settings.downloadOnCellular
+    }
+
+    /**
+     * Run the tasks that should run and hold the rest: the ones paused, all
+     * of them while a video plays (if so set) or on mobile data when that's
+     * turned off.
+     */
+    private func applyTaskStates() {
+        guard started else { return }
+        let allowed = connectionAllows && !pausedForPlayback
+        forEachTask { tasks in
+            for (task, id, token) in tasks {
+                guard self.isCurrent(id, token) else { continue }
+                let run = allowed && self.all.first(where: { $0.id == id })?.state == .downloading
+                if run, task.state == .suspended {
+                    task.resume()
+                } else if !run, task.state == .running {
+                    task.suspend()
+                }
+            }
+        }
+    }
+
+    private func cancelTasks(of id: String) {
+        liveTasks.remove(id)
+        forEachTask { tasks in
+            for (task, taskId, _) in tasks where taskId == id { task.cancel() }
+        }
+    }
+
+    private func connectionChanged() {
+        applyTaskStates()
+        pump()
+        Task { await keepNextEpisodes() }
+    }
+
+    /**
+     * Settings → Downloads → Download on mobile data was changed. Downloads
+     * started while it was off are refused mobile data by the system too, so
+     * with it on, the ones waiting on mobile data now start again.
+     */
+    func cellularSettingChanged() {
+        if graph.settings.settings.downloadOnCellular && graph.network.metered {
+            for record in all where !record.isDone && record.state != .failed && record.cellularAllowed == false && liveTasks.contains(record.id) {
+                cancelTasks(of: record.id)
+                update(record.id) {
+                    if $0.state == .downloading { $0.state = .queued }
+                    $0.taskToken = nil
+                    $0.progress = 0
+                    $0.bytes = 0
+                }
+            }
+        }
+        applyTaskStates()
+        pump()
+    }
+
+    func pause(_ id: String) {
+        update(id) { if $0.state == .downloading || $0.state == .queued { $0.state = .paused } }
+        applyTaskStates()
+        pump()
+    }
+
+    func resume(_ id: String) {
+        guard all.first(where: { $0.id == id })?.state == .paused else { return }
+        let hasTask = liveTasks.contains(id)
+        update(id) { $0.state = hasTask ? .downloading : .queued }
+        applyTaskStates()
+        pump()
+    }
+
+    /** Whether every download not finished (and not failed) is paused. */
+    var allPaused: Bool {
+        let unfinished = active.filter { $0.state != .failed }
+        return !unfinished.isEmpty && unfinished.allSatisfy { $0.state == .paused }
+    }
+
+    func pauseAll() {
+        for record in active where record.state == .downloading || record.state == .queued {
+            update(record.id) { $0.state = .paused }
+        }
+        applyTaskStates()
+    }
+
+    func resumeAll() {
+        for record in active where record.state == .paused {
+            let hasTask = liveTasks.contains(record.id)
+            update(record.id) { $0.state = hasTask ? .downloading : .queued }
+        }
+        applyTaskStates()
+        pump()
+    }
+
     func retry(_ id: String) {
+        cancelTasks(of: id)
         update(id) {
             $0.state = .queued
             $0.error = nil
             $0.progress = 0
+            $0.taskToken = nil
         }
         pump()
     }
@@ -432,6 +572,40 @@ final class DownloadManager: NSObject {
         all.removeAll { $0.profileId == profileId }
         save()
         reload()
+    }
+
+    // --------------------------------------------------- subtitles added later --
+
+    /**
+     * Save the text subtitles the server has for a finished download that
+     * weren't there when it was downloaded (found online in the player, or
+     * added on the server since), when Settings → Downloads says so or with
+     * [force]. The download as it is afterwards, and how many were added.
+     */
+    @discardableResult
+    func refreshSubtitles(_ id: String, force: Bool = false) async -> (record: DownloadRecord, added: Int)? {
+        guard force || graph.settings.settings.saveNewSubtitles, let client = graph.auth.client, graph.network.online,
+              let record = record(id), record.isDone, let fresh = try? await client.item(id),
+              let source = fresh.mediaSources?.first(where: { $0.id == record.mediaSourceId }) ?? fresh.primarySource
+        else { return nil }
+        let have = Set(record.subtitles.map(\.index))
+        var added: [DownloadedSubtitle] = []
+        for stream in source.subtitleStreams where !stream.isImageSubtitle && !have.contains(stream.index) {
+            let name = "\(id)-sub-\(stream.index).srt"
+            guard let url = client.subtitleURL(itemId: id, mediaSourceId: source.id, index: stream.index),
+                  let (data, response) = try? await URLSession.shared.data(from: url),
+                  (response as? HTTPURLResponse)?.statusCode ?? 200 < 300, !data.isEmpty,
+                  (try? data.write(to: Self.folder.appendingPathComponent(name), options: .atomic)) != nil
+            else { continue }
+            added.append(DownloadedSubtitle(index: stream.index, file: name, language: stream.language, title: stream.label, isForced: stream.isForced, isDefault: stream.isDefault))
+        }
+        // The fresh details list the new tracks, so the player offers them.
+        update(id) {
+            $0.item = fresh
+            $0.subtitles += added
+        }
+        guard let updated = self.record(id) else { return nil }
+        return (updated, added.count)
     }
 
     // ------------------------------------------------------ watched offline --
@@ -473,11 +647,14 @@ final class DownloadManager: NSObject {
 
     // ------------------------------------------------------------ helpers --
 
-    fileprivate func id(for task: URLSessionTask) -> String? {
-        tasks[task.taskIdentifier] ?? task.taskDescription
-    }
-
-    fileprivate func finished(_ id: String, file: String, kind: DownloadKind, bytes: Int64) {
+    fileprivate func finished(_ id: String, token: String?, file: String, kind: DownloadKind, bytes: Int64) {
+        guard isCurrent(id, token), all.first(where: { $0.id == id })?.isDone == false else {
+            // A download deleted or started again since: what came in isn't wanted.
+            let base = kind == .hls ? URL(fileURLWithPath: NSHomeDirectory()) : Self.folder
+            try? FileManager.default.removeItem(at: base.appendingPathComponent(file))
+            return
+        }
+        liveTasks.remove(id)
         update(id) {
             $0.state = .done
             $0.file = file
@@ -489,8 +666,10 @@ final class DownloadManager: NSObject {
         pump()
     }
 
-    fileprivate func failed(_ id: String, _ error: Error?) {
+    fileprivate func failed(_ id: String, token: String?, _ error: Error?) {
         if let error = error as? URLError, error.code == .cancelled { return }
+        guard isCurrent(id, token) else { return }
+        liveTasks.remove(id)
         update(id) {
             $0.state = .failed
             $0.error = error.map { JellyfinError.from($0).localizedDescription } ?? "The download stopped."
@@ -498,8 +677,8 @@ final class DownloadManager: NSObject {
         pump()
     }
 
-    fileprivate func progressed(_ id: String, _ fraction: Double, bytes: Int64?) {
-        guard let index = all.firstIndex(where: { $0.id == id }) else { return }
+    fileprivate func progressed(_ id: String, token: String?, _ fraction: Double, bytes: Int64?) {
+        guard isCurrent(id, token), let index = all.firstIndex(where: { $0.id == id }) else { return }
         // Not saved on every step; the index is written when the state changes.
         all[index].progress = min(0.999, max(0, fraction))
         if let bytes { all[index].bytes = bytes }
@@ -529,11 +708,11 @@ final class DownloadManager: NSObject {
 extension DownloadManager: URLSessionDownloadDelegate {
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         // The file is gone once this returns, so it is moved now, on this thread.
-        let id = downloadTask.taskDescription ?? ""
+        guard let (id, token) = DownloadManager.parse(downloadTask.taskDescription) else { return }
         let response = downloadTask.response as? HTTPURLResponse
         guard (response?.statusCode ?? 200) < 300 else {
             let status = response?.statusCode ?? 0
-            Task { @MainActor in self.failed(id, JellyfinError.server(status, nil)) }
+            Task { @MainActor in self.failed(id, token: token, JellyfinError.server(status, nil)) }
             return
         }
         let suggested = response?.suggestedFilename.flatMap { $0.split(separator: ".").last.map(String.init) } ?? "mp4"
@@ -543,24 +722,23 @@ extension DownloadManager: URLSessionDownloadDelegate {
         do {
             try FileManager.default.moveItem(at: location, to: target)
             let bytes = DownloadManager.size(of: target)
-            Task { @MainActor in self.finished(id, file: name, kind: .original, bytes: bytes) }
+            Task { @MainActor in self.finished(id, token: token, file: name, kind: .original, bytes: bytes) }
         } catch {
-            Task { @MainActor in self.failed(id, error) }
+            Task { @MainActor in self.failed(id, token: token, error) }
         }
     }
 
     nonisolated func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        let id = downloadTask.taskDescription ?? ""
+        guard let (id, token) = DownloadManager.parse(downloadTask.taskDescription) else { return }
         Task { @MainActor in
             let expected = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : (self.record(id)?.expectedBytes ?? 0)
-            self.progressed(id, expected > 0 ? Double(totalBytesWritten) / Double(expected) : 0, bytes: totalBytesWritten)
+            self.progressed(id, token: token, expected > 0 ? Double(totalBytesWritten) / Double(expected) : 0, bytes: totalBytesWritten)
         }
     }
 
     nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let error else { return }
-        let id = task.taskDescription ?? ""
-        Task { @MainActor in self.failed(id, error) }
+        guard let error, let (id, token) = DownloadManager.parse(task.taskDescription) else { return }
+        Task { @MainActor in self.failed(id, token: token, error) }
     }
 
     nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
@@ -573,20 +751,20 @@ extension DownloadManager: URLSessionDownloadDelegate {
 
 extension DownloadManager: AVAssetDownloadDelegate {
     nonisolated func urlSession(_ session: URLSession, assetDownloadTask: AVAssetDownloadTask, didFinishDownloadingTo location: URL) {
-        let id = assetDownloadTask.taskDescription ?? ""
+        guard let (id, token) = DownloadManager.parse(assetDownloadTask.taskDescription) else { return }
         // Kept relative to the app's home: the full path changes between app updates.
         let home = NSHomeDirectory()
         let relative = location.path.hasPrefix(home) ? String(location.path.dropFirst(home.count + 1)) : location.relativePath
         let bytes = DownloadManager.size(of: location)
-        Task { @MainActor in self.finished(id, file: relative, kind: .hls, bytes: bytes) }
+        Task { @MainActor in self.finished(id, token: token, file: relative, kind: .hls, bytes: bytes) }
     }
 
     nonisolated func urlSession(_ session: URLSession, assetDownloadTask: AVAssetDownloadTask, didLoad timeRange: CMTimeRange, totalTimeRangesLoaded loadedTimeRanges: [NSValue], timeRangeExpectedToLoad: CMTimeRange) {
-        let id = assetDownloadTask.taskDescription ?? ""
+        guard let (id, token) = DownloadManager.parse(assetDownloadTask.taskDescription) else { return }
         let loaded = loadedTimeRanges.reduce(0.0) { $0 + $1.timeRangeValue.duration.seconds }
         let expected = timeRangeExpectedToLoad.duration.seconds
         Task { @MainActor in
-            self.progressed(id, expected > 0 ? loaded / expected : 0, bytes: nil)
+            self.progressed(id, token: token, expected > 0 ? loaded / expected : 0, bytes: nil)
         }
     }
 }

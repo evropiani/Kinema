@@ -26,9 +26,30 @@ struct DownloadsScreen: View {
                 .listRowBackground(theme.colors.glass)
             }
             if !active.isEmpty {
-                Section("Downloading") {
+                Section {
                     ForEach(active) { record in
                         DownloadRow(record: record)
+                    }
+                } header: {
+                    HStack {
+                        Text(downloads.allPaused ? "Paused" : downloads.waitingForWiFi ? "Waiting for Wi-Fi" : "Downloading")
+                        Spacer()
+                        if active.contains(where: { $0.state != .failed }) {
+                            Button {
+                                Haptics.tap()
+                                if downloads.allPaused { downloads.resumeAll() } else { downloads.pauseAll() }
+                            } label: {
+                                Label(downloads.allPaused ? "Resume All" : "Pause All", systemImage: downloads.allPaused ? "play.fill" : "pause.fill")
+                                    .font(KFont.labelLarge)
+                                    .textCase(nil)
+                                    .foregroundStyle(theme.colors.accent)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                } footer: {
+                    if downloads.waitingForWiFi {
+                        Text("Downloading on mobile data is turned off in Settings → Downloads.")
                     }
                 }
             }
@@ -133,11 +154,16 @@ struct DownloadRow: View {
                     case .failed:
                         Text(record.error ?? "Failed").font(KFont.bodySmall).foregroundStyle(c.danger).lineLimit(2)
                     case .queued:
-                        Text(graph.network.metered && !graph.settings.settings.downloadOnCellular ? "Waiting for Wi-Fi" : "Waiting…").font(KFont.bodySmall).foregroundStyle(c.ink3)
+                        Text(downloads.waitingForWiFi ? "Waiting for Wi-Fi" : "Waiting…").font(KFont.bodySmall).foregroundStyle(c.ink3)
                     case .downloading, .paused:
                         VStack(alignment: .leading, spacing: 4) {
                             ProgressBar(value: record.progress, height: 4)
-                            Text("\(Int(record.progress * 100))%\(record.bytes > 0 ? " · \(Format.fileSize(record.bytes))" : "")")
+                                .opacity(record.state == .paused ? 0.45 : 1)
+                            Text(([
+                                record.progress > 0 ? "\(Int(record.progress * 100))%" : nil,
+                                record.bytes > 0 ? Format.fileSize(record.bytes) : nil,
+                                record.state == .paused ? "Paused" : downloads.waitingForWiFi ? "Waiting for Wi-Fi" : nil,
+                            ] as [String?]).compactMap { $0 }.joined(separator: " · "))
                                 .font(KFont.bodySmall.monospacedDigit())
                                 .foregroundStyle(c.ink3)
                         }
@@ -152,6 +178,17 @@ struct DownloadRow: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Try again")
+                } else {
+                    // Pause or carry on with this one.
+                    let paused = record.state == .paused
+                    Button {
+                        Haptics.tap()
+                        if paused { downloads.resume(record.id) } else { downloads.pause(record.id) }
+                    } label: {
+                        Image(systemName: paused ? "play.circle.fill" : "pause.circle.fill").font(.system(size: 26)).foregroundStyle(c.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(paused ? "Resume" : "Pause")
                 }
             }
             .contentShape(Rectangle())
@@ -167,8 +204,26 @@ struct DownloadRow: View {
                 Button { graph.player.openOffline(record) } label: { Label("Play", systemImage: "play.fill") }
                 Button { graph.player.openOffline(record, startTicks: 0) } label: { Label("Play from the beginning", systemImage: "backward.end.fill") }
             }
+            if !record.isDone && record.state != .failed {
+                if record.state == .paused {
+                    Button { downloads.resume(record.id) } label: { Label("Resume", systemImage: "play.fill") }
+                } else {
+                    Button { downloads.pause(record.id) } label: { Label("Pause", systemImage: "pause.fill") }
+                }
+            }
             if graph.auth.client != nil && graph.network.online {
                 Button { graph.actions.open(item) } label: { Label("Details", systemImage: "info.circle") }
+                if record.isDone {
+                    Button {
+                        Task {
+                            let result = await downloads.refreshSubtitles(record.id, force: true)
+                            let added = result?.added ?? 0
+                            graph.messages.show(added == 0 ? "No new subtitles on the server" : added == 1 ? "1 new subtitle saved" : "\(added) new subtitles saved", added > 0 ? .success : .info)
+                        }
+                    } label: {
+                        Label("Get New Subtitles", systemImage: "captions.bubble")
+                    }
+                }
             }
             Button(role: .destructive) { downloads.remove(record.id) } label: {
                 Label(record.isDone ? "Delete download" : "Cancel download", systemImage: "trash")

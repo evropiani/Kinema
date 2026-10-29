@@ -212,8 +212,8 @@ private struct SubtitlePanel: View {
             }
             PanelHeading(text: "More")
             PanelRow(title: "Subtitle style", detail: "Size, colour, outline, position", icon: "textformat.size") { player.panel = .subtitleStyle }
-            if player.offline == nil {
-                PanelRow(title: "Find subtitles online", detail: "Through your server's subtitle providers", icon: "magnifyingglass") { player.panel = .onlineSubtitles }
+            if player.offline == nil || (AppGraph.shared.network.online && AppGraph.shared.auth.client != nil) {
+                PanelRow(title: "Find subtitles online", detail: player.offline == nil ? "Through your server's subtitle providers" : "Saved with the download too", icon: "magnifyingglass") { player.panel = .onlineSubtitles }
             }
         }
     }

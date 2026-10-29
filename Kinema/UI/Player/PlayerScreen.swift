@@ -51,6 +51,8 @@ struct PlayerScreen: View {
                 SystemVolumeHost().frame(width: 1, height: 1).opacity(0.01)
             }
             .animation(theme.ease, value: player.panel)
+            .onAppear { player.portraitLayout = proxy.size.height > proxy.size.width }
+            .onChange(of: proxy.size) { _, size in player.portraitLayout = size.height > size.width }
         }
         .preferredColorScheme(.dark)
         .environment(\.kinema, playerTheme)

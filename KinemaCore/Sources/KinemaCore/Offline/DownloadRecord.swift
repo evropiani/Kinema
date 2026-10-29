@@ -51,6 +51,10 @@ struct DownloadRecord: Codable, Hashable, Identifiable {
     var createdAt: Date
     /** Downloaded by itself, to keep a show's next episodes ready (Settings → Downloads); nil for older records. */
     var automatic: Bool?
+    /** Names the background task downloading it now, so a stale task's news is told apart. */
+    var taskToken: String?
+    /** Whether that task may use mobile data (Settings → Downloads, when it was started). */
+    var cellularAllowed: Bool?
 
     /** Watched offline and not yet told to the server. */
     var localPositionTicks: Int64?

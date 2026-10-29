@@ -791,8 +791,9 @@ private struct DownloadsPage: View {
                     ForEach(DownloadQuality.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 Toggle("Save subtitles with downloads", isOn: setting(\.downloadSubtitles))
+                Toggle("Add subtitles found later", isOn: setting(\.saveNewSubtitles))
             } footer: {
-                Text("Original keeps the file as it is (repackaged by the server when iOS can't play its format). The other qualities are converted by the server and take less space.")
+                Text("Original keeps the file as it is (repackaged by the server when iOS can't play its format). The other qualities are converted by the server and take less space. Subtitles found later, online in the player or added on the server, are saved with a download the next time it's played with a connection.")
             }
             Section {
                 Picker("Keep the next episodes", selection: Binding(
@@ -817,12 +818,18 @@ private struct DownloadsPage: View {
                      : "Kinema can keep the next episodes of the shows you've downloaded ready, and fetch more as you watch.")
             }
             Section {
-                Toggle("Download on mobile data", isOn: setting(\.downloadOnCellular))
+                Toggle("Download on mobile data", isOn: Binding(
+                    get: { s.downloadOnCellular },
+                    set: { on in
+                        AppGraph.shared.settings.update { $0.downloadOnCellular = on }
+                        downloads.cellularSettingChanged()
+                    }
+                ))
                 Stepper("At the same time: \(s.concurrentDownloads)", value: setting(\.concurrentDownloads), in: 1...5)
                 Toggle("Pause while a video plays", isOn: setting(\.pauseDownloadsWhilePlaying))
                 Toggle("Show progress over the tab bar", isOn: setting(\.showDownloadIndicator))
             } footer: {
-                Text("Pausing keeps the connection free for what you're watching. The progress strip takes you to Downloads when tapped.")
+                Text("With mobile data off, downloads wait for Wi-Fi, also while Kinema is closed. Pausing keeps the connection free for what you're watching. The progress strip takes you to Downloads when tapped.")
             }
             Section {
                 LabeledContent("Downloaded", value: Format.fileSize(downloads.usedBytes))

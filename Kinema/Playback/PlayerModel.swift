@@ -65,6 +65,10 @@ final class PlayerModel: NSObject {
     var aspect: AspectMode = .fit
     /** Turned to portrait for an upright video. */
     private(set) var portrait = false
+    /** Portrait or landscape chosen in the player (•••), kept for the episodes after, until it closes. */
+    @ObservationIgnored private var orientationChosen = false
+    /** Whether the player is taller than wide on screen right now (set by the player's screen). */
+    var portraitLayout = false
 
     // ------------------------------------------------- segments and up next --
     private(set) var segments: [MediaSegment] = []
@@ -180,7 +184,20 @@ final class PlayerModel: NSObject {
         start(AVPlayerItem(asset: asset), at: startPosition)
         Task { await loadSubtitles() }
         Task { await loadSegments(record.item) }
+        Task { await refreshDownloadedSubtitles(record.id) }
         loadEpisodesAround(record.item)
+    }
+
+    /** With a connection, subtitles added on the server since the download are saved with it and listed. */
+    private func refreshDownloadedSubtitles(_ id: String) async {
+        guard let refreshed = await graph.downloads.refreshSubtitles(id), refreshed.added > 0, offline?.id == id else { return }
+        offline = refreshed.record
+        item = refreshed.record.item
+        if var current = stream, let updated = refreshed.record.item.mediaSources?.first(where: { $0.id == current.source.id }) {
+            current.source = updated
+            stream = current
+        }
+        graph.messages.show(refreshed.added == 1 ? "1 new subtitle saved with the download" : "\(refreshed.added) new subtitles saved with the download")
     }
 
     private func begin(_ item: Item) {
@@ -232,16 +249,18 @@ final class PlayerModel: NSObject {
         showControls()
         if !graph.ui.playerOpen {
             graph.ui.playerOpen = true
+            // A fresh start; the next episode keeps the orientation chosen for this one.
+            portrait = false
+            orientationChosen = false
         }
-        portrait = false
         AppDelegate.lock(playerOrientation)
         graph.downloads.pauseForPlayback(settings.pauseDownloadsWhilePlaying)
         loadArtwork(item)
     }
 
-    /** Landscape, or turning with the phone, as chosen in Settings → Player. */
+    /** The orientation chosen in the player, else landscape or turning with the phone (Settings → Player). */
     private var playerOrientation: UIInterfaceOrientationMask {
-        if portrait { return .portrait }
+        if orientationChosen { return portrait ? .portrait : .landscape }
         return graph.settings.settings.landscapeByDefault ? .landscape : .allButUpsideDown
     }
 
@@ -635,16 +654,15 @@ final class PlayerModel: NSObject {
         graph.messages.show(aspect.label)
     }
 
+    /**
+     * Turn to the other orientation from the one on screen, and stay there
+     * (also for the next episodes) until the player closes.
+     */
     func toggleOrientation() {
-        portrait.toggle()
-        AppDelegate.lock(portrait ? .portrait : .landscape)
-        if !portrait && !graph.settings.settings.landscapeByDefault {
-            // Back to turning with the phone, once it's sideways.
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 800_000_000)
-                if !self.portrait { AppDelegate.lock(self.playerOrientation) }
-            }
-        }
+        portrait = !portraitLayout
+        orientationChosen = true
+        AppDelegate.lock(playerOrientation)
+        showControls()
     }
 
     func setQuality(_ bitrate: Int?) {
@@ -767,10 +785,15 @@ final class PlayerModel: NSObject {
         if secondary != subtitles.secondary { subtitles.secondary = secondary }
     }
 
-    /** The server found a subtitle online; show it once the server has it. */
+    /** The server found a subtitle online; show it once the server has it (and keep it with the download, if there is one). */
     func remoteSubtitleDownloaded() async {
         guard let client = graph.auth.client, let item, let full = try? await client.item(item.id) else { return }
         let before = Set(subtitleStreams.map(\.index))
+        // Playing the download, it's what was asked for, whatever the setting.
+        if let refreshed = await graph.downloads.refreshSubtitles(item.id, force: offline?.id == item.id), offline?.id == item.id {
+            offline = refreshed.record
+        }
+        guard self.item?.id == full.id else { return }
         self.item = full
         if var current = stream, let updated = full.mediaSources?.first(where: { $0.id == current.source.id }) {
             current.source = updated

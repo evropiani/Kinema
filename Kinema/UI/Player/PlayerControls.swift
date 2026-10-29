@@ -89,7 +89,7 @@ private struct MoreMenu: View {
                 Button { open(.quality) } label: { Label("Quality", systemImage: "dial.medium") }
             }
             Button { open(.subtitleStyle) } label: { Label("Subtitle style", systemImage: "textformat.size") }
-            if player.offline == nil {
+            if player.offline == nil || (AppGraph.shared.network.online && AppGraph.shared.auth.client != nil) {
                 Button { open(.onlineSubtitles) } label: { Label("Find subtitles online", systemImage: "magnifyingglass") }
             }
             Divider()
@@ -101,7 +101,7 @@ private struct MoreMenu: View {
                 Label(player.recordingGIF ? "Stop and save the GIF" : "Record a GIF", systemImage: "record.circle")
             }
             Button { player.toggleOrientation() } label: {
-                Label(player.portrait ? "Landscape" : "Portrait", systemImage: "rectangle.portrait.rotate")
+                Label(player.portraitLayout ? "Landscape" : "Portrait", systemImage: "rectangle.portrait.rotate")
             }
             Section(player.segmentSources.map { "Skipping · from \($0)" } ?? "Skipping") {
                 Toggle(isOn: Binding(get: { settings.skipIntro == .automatic }, set: { player.setAutoSkip(intro: $0) })) {
@@ -137,13 +137,20 @@ private struct MoreMenu: View {
     }
 }
 
+/** Play in the middle, skipping either side, and the previous and next episode outside those. */
 private struct CenterControls: View {
     var body: some View {
         let player = AppGraph.shared.player
         let settings = AppGraph.shared.settings.settings
-        HStack(spacing: 46) {
-            if settings.showEpisodeButtons && player.previousEpisode != nil {
+        let compact = player.portraitLayout
+        // Previous and next keep their places even when one is missing, so play stays in the middle.
+        let episodeButtons = settings.showEpisodeButtons && (player.previousEpisode != nil || player.nextEpisode != nil)
+        HStack(spacing: compact ? 18 : 46) {
+            if episodeButtons {
                 ControlButton(icon: "backward.end.fill", label: "Previous episode", size: 22) { player.playPrevious() }
+                    .opacity(player.previousEpisode == nil ? 0 : 1)
+                    .disabled(player.previousEpisode == nil)
+                    .accessibilityHidden(player.previousEpisode == nil)
             }
             ControlButton(icon: "gobackward.\(settings.skipBack)", fallback: "gobackward", label: "Back \(settings.skipBack) seconds", size: 30) {
                 player.skip(-Double(settings.skipBack))
@@ -169,33 +176,51 @@ private struct CenterControls: View {
                 player.skip(Double(settings.skipForward))
                 player.showControls()
             }
-            if settings.showEpisodeButtons && player.nextEpisode != nil {
+            if episodeButtons {
                 ControlButton(icon: "forward.end.fill", label: "Next episode", size: 22) { player.playNext() }
+                    .opacity(player.nextEpisode == nil ? 0 : 1)
+                    .disabled(player.nextEpisode == nil)
+                    .accessibilityHidden(player.nextEpisode == nil)
             }
         }
     }
 }
 
+/**
+ * The tools along the bottom: with their names where there's room, as
+ * icons where there isn't, and in portrait without the screenshot, GIF and
+ * fit buttons (they're in ••• too).
+ */
 private struct BottomBar: View {
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            bar(labels: true, extras: true)
+            bar(labels: false, extras: true)
+            bar(labels: false, extras: false)
+        }
+    }
+
+    private func bar(labels: Bool, extras: Bool) -> some View {
         let player = AppGraph.shared.player
-        HStack(spacing: 6) {
+        return HStack(spacing: 6) {
             ToolButton(icon: "speedometer", text: String(format: "%g×", player.speed)) { player.panel = .speed }
-            ToolButton(icon: "waveform", text: "Audio") { player.panel = .audio }
-            ToolButton(icon: player.subtitleIndex == nil ? "captions.bubble" : "captions.bubble.fill", text: "Subtitles") { player.panel = .subtitles }
+            ToolButton(icon: "waveform", text: "Audio", showsText: labels) { player.panel = .audio }
+            ToolButton(icon: player.subtitleIndex == nil ? "captions.bubble" : "captions.bubble.fill", text: "Subtitles", showsText: labels) { player.panel = .subtitles }
             if !player.chapters.isEmpty {
-                ToolButton(icon: "list.bullet.rectangle", text: "Chapters") { player.panel = .chapters }
+                ToolButton(icon: "list.bullet.rectangle", text: "Chapters", showsText: labels) { player.panel = .chapters }
             }
             if player.seasonEpisodes.count > 1 {
-                ToolButton(icon: "rectangle.stack", text: "Episodes") { player.panel = .episodes }
+                ToolButton(icon: "rectangle.stack", text: "Episodes", showsText: labels) { player.panel = .episodes }
             }
             Spacer(minLength: 4)
-            if AppGraph.shared.settings.settings.showCaptureButtons {
+            if extras && AppGraph.shared.settings.settings.showCaptureButtons {
                 ControlButton(icon: "camera", label: "Screenshot", size: 16) { player.screenshot() }
                 ControlButton(icon: player.recordingGIF ? "stop.circle.fill" : "record.circle", label: player.recordingGIF ? "Stop recording" : "Record a GIF", size: 16) { player.toggleGIF() }
             }
-            ToolButton(icon: aspectIcon(player.aspect), text: player.aspect.label) { player.cycleAspect() }
-            ToolButton(icon: "lock.open", text: "Lock") {
+            if extras {
+                ToolButton(icon: aspectIcon(player.aspect), text: player.aspect.label, showsText: labels) { player.cycleAspect() }
+            }
+            ToolButton(icon: "lock.open", text: "Lock", showsText: labels) {
                 player.locked = true
                 player.panel = nil
                 Haptics.tap()
@@ -236,6 +261,7 @@ struct ControlButton: View {
 private struct ToolButton: View {
     let icon: String
     let text: String
+    var showsText = true
     let action: () -> Void
 
     var body: some View {
@@ -245,9 +271,11 @@ private struct ToolButton: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon).font(.system(size: 15, weight: .semibold))
-                Text(text).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                if showsText {
+                    Text(text).font(.system(size: 13, weight: .semibold)).lineLimit(1).fixedSize()
+                }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, showsText ? 12 : 11)
             .frame(height: 36)
             .background(Capsule().fill(.white.opacity(0.1)))
             .contentShape(Capsule())

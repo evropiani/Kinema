@@ -60,8 +60,9 @@ for free.
   when needed. HEVC, HDR10, HLG and Dolby Vision play where the iPhone can.
   Watching is reported to the server, so progress follows you everywhere.
 - **Downloads** for watching offline, as the original file or a smaller
-  copy made by the server, with their subtitles and artwork, several at a
-  time, with a floating progress strip. A show's unwatched episodes download
+  copy made by the server, with their subtitles (also ones found online
+  later) and artwork, several at a time, paused and resumed one by one or
+  all together, with a floating progress strip. A show's unwatched episodes download
   in one go, Kinema can keep the next episodes of the shows you're watching
   downloaded by itself, and an icon by each title says whether it's
   downloaded, whole or in part. What you watch offline is sent to the server once you're
