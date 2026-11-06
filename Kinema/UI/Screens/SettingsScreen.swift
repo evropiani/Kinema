@@ -46,7 +46,7 @@ struct SettingsScreen: View {
                 link(.storage, "Storage", "internaldrive.fill", 0x636366)
             }
             Section {
-                link(.about, "About Kinema", "info.circle.fill", 0x3B4E7B)
+                link(.about, "About Kinema", "info.circle.fill", 0xE8590C)
             }
         }
         .navigationTitle("Settings")
@@ -277,9 +277,9 @@ private struct QuickConnectSheet: View {
                 if let failure {
                     Text(failure).font(KFont.bodySmall).foregroundStyle(c.danger).multilineTextAlignment(.center)
                 }
-                WideGlassButton(title: working ? "Signing In…" : "Sign In Device", icon: "checkmark", prominent: true, enabled: code.count >= 6 && !working, action: authorize)
+                WideButton(title: working ? "Signing In…" : "Sign In Device", icon: "checkmark", prominent: true, enabled: code.count >= 6 && !working, action: authorize)
             } else {
-                WideGlassButton(title: "Done", icon: "checkmark", prominent: done) { dismiss() }
+                WideButton(title: "Done", icon: "checkmark", prominent: done) { dismiss() }
             }
         }
         .padding(24)
@@ -419,12 +419,72 @@ private struct GeneralPage: View {
 
 // ------------------------------------------------------------- appearance --
 
+/** The icons Kinema can show on the home screen, in Kultr's colours; Cream is the main one. */
+private enum AppIcon: String, CaseIterable, Identifiable {
+    case cream, ember, night, classic
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    /** The icon set's name for iOS, nil for the main icon. */
+    var iconName: String? { self == .cream ? nil : "AppIcon-\(label)" }
+}
+
+/** The four icons side by side; tapping one puts it on the home screen. */
+private struct AppIconPicker: View {
+    @Environment(\.kinema) private var theme
+    @State private var current = UIApplication.shared.alternateIconName
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AppIcon.allCases) { icon in
+                let selected = current == icon.iconName
+                Button { choose(icon) } label: {
+                    VStack(spacing: 6) {
+                        Image("IconPreview\(icon.label)")
+                            .resizable()
+                            .frame(width: 60, height: 60)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(selected ? theme.colors.accent : Color.primary.opacity(0.12), lineWidth: selected ? 3 : 1)
+                            }
+                        Text(icon.label)
+                            .font(.caption)
+                            .foregroundStyle(selected ? .primary : .secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(icon.label) icon")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func choose(_ icon: AppIcon) {
+        guard current != icon.iconName, UIApplication.shared.supportsAlternateIcons else { return }
+        Haptics.select()
+        Task {
+            do {
+                try await UIApplication.shared.setAlternateIconName(icon.iconName)
+                current = icon.iconName
+            } catch {
+                AppGraph.shared.messages.error("Couldn't change the icon: \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
 private struct AppearancePage: View {
     @Environment(\.kinema) private var theme
 
     var body: some View {
         let s = AppGraph.shared.settings.settings
         List {
+            Section("App icon") {
+                AppIconPicker()
+            }
             Section {
                 Picker("Theme", selection: setting(\.theme)) {
                     ForEach(ThemeMode.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -472,7 +532,7 @@ private struct PosterSizePreview: View {
             HStack(spacing: spacing) {
                 ForEach(0..<count, id: \.self) { i in
                     RoundedRectangle(cornerRadius: theme.radii.xs, style: .continuous)
-                        .fill(LinearGradient(colors: [theme.colors.accent.opacity(0.7 - Double(i % 6) * 0.08), theme.colors.accent.opacity(0.2)], startPoint: .top, endPoint: .bottom))
+                        .fill(theme.colors.sand)
                         .frame(width: width, height: width * 1.5)
                 }
             }

@@ -101,7 +101,7 @@ jobs:
           }
           shoot 26 "" welcome server home badges badges-series library movie series episodes search found settings settings-accounts settings-general settings-appearance settings-playback settings-player player player-controls player-portrait downloads downloads-paused
           shoot 18 "ios18-" home lens library movie
-          LOOK=light shoot 26 "light-" home movie
+          LOOK=light shoot 26 "light-" home movie series library settings-appearance downloads-paused
 
       - name: Publish screenshots
         if: always() && github.ref != 'refs/heads/main'

@@ -58,7 +58,6 @@ struct PlayerScreen: View {
         .environment(\.kinema, playerTheme)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
-        .artworkTint(player.item?.backdropImage ?? player.item?.posterImage)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -69,7 +68,7 @@ struct PlayerScreen: View {
     /** The player is always dark, whatever the rest of the app is. */
     private var playerTheme: KinemaTheme {
         var copy = theme
-        copy.colors = .make(dark: true, accent: theme.colors.accentArgb, night: true)
+        copy.colors = .make(dark: true, night: true)
         return copy
     }
 }

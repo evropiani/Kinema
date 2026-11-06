@@ -43,12 +43,9 @@ struct ArtworkImage: View {
                 .scaledToFill()
         } else {
             ZStack {
-                LinearGradient(
-                    colors: [theme.colors.accent.opacity(0.45), theme.colors.accent.opacity(0.1)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .background(theme.colors.elevated)
+                // Flat sand where there's no picture, as in Kultr.
+                theme.colors.sand
+                    .background(theme.colors.elevated)
                 if let label, !label.isEmpty {
                     Text(Format.initials(label))
                         .font(.system(size: 26, weight: .bold))

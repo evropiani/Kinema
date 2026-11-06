@@ -127,8 +127,8 @@ struct GlassIconButton: View {
     }
 }
 
-/** A wide button (Play, Shuffle, Connect): glass on iOS 26, filled with the accent when prominent. */
-struct WideGlassButton: View {
+/** A wide button (Play, Connect), as in Kultr: orange when prominent, sand with an orange label otherwise. */
+struct WideButton: View {
     @Environment(\.kinema) private var theme
     let title: String
     let icon: String
@@ -138,28 +138,22 @@ struct WideGlassButton: View {
 
     var body: some View {
         let c = theme.colors
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         Button {
             Haptics.tap()
             action()
         } label: {
             Label(title, systemImage: icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle((prominent ? c.onAccent : c.accent).opacity(enabled ? 1 : 0.5))
+                .font(.headline)
+                .foregroundStyle(prominent ? c.onAccent : c.accent)
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
+                .background(shape.fill(prominent ? c.accent : c.sand))
+                .opacity(enabled ? 1 : 0.5)
                 .contentShape(shape)
         }
         .buttonStyle(PressScaleStyle())
         .disabled(!enabled)
-        .background(shape.fill(prominent && !Self.glassTints ? c.accent : .clear))
-        .kinemaGlass(shape, tint: prominent ? c.accent : nil, interactive: true, shadow: false)
-    }
-
-    /** On iOS 26 the glass itself carries the accent; before, the button is filled with it. */
-    private static var glassTints: Bool {
-        if #available(iOS 26.0, *) { return true }
-        return false
     }
 }
 

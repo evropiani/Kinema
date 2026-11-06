@@ -3,11 +3,10 @@
 <img src="docs/logo.png" alt="Kinema icon" width="112" align="right">
 
 A native iPhone and iPad client for [Jellyfin](https://jellyfin.org): your
-films and shows, browsed on pages that take their colour from the artwork,
-and played in a player made for watching. It has the look and feel of
-[Kultr](https://kultr.cc) (liquid glass, a floating tab bar, artwork-tinted
-pages) and the features you'd expect from the best paid video players,
-for free.
+films and shows, browsed in a quiet, warm look and played in a player made
+for watching. It has the look and feel of [Kultr](https://kultr.cc) (cream
+and charcoal pages, one orange, liquid glass that floats over them) and the
+features you'd expect from the best paid video players, for free.
 
 <p>
   <img src="docs/screenshots/1-home.jpg" alt="Home" width="19%">
@@ -76,10 +75,15 @@ for free.
   Connect**, a list of the server's users to tap, and Jellyfin's demo server
   to try without one. Kinema can also sign other devices in with Quick
   Connect, from Settings → Accounts.
+- **Kultr's look.** Cream pages and warm black text in light mode, warm
+  charcoal in dark, and one orange for whatever you can tap. No gradients:
+  the posters are the colour. Text follows Larger Text in the iPhone's
+  settings, and light and dark follow the iPhone (or choose one), with
+  **Night mode** for OLED screens. Four app icons in Kultr's colours, Cream,
+  Ember, Night and Classic, in Settings → Appearance.
 - **Liquid glass** on iOS 26 (the system's own tab bar with the round
   search button); on iOS 17 and 18 Kinema draws a floating glass bar that
-  behaves the same way. Dark, light or automatic, and **Night mode** for
-  OLED screens.
+  behaves the same way.
 - **Updates from inside the app**: Kinema tells you about new versions,
   shows what's new, and hands the update to SideStore or AltStore.
 

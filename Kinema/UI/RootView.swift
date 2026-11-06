@@ -17,10 +17,9 @@ struct RootView: View {
             case .system: return systemScheme == .dark
             }
         }()
-        // The logo's blue; title pages take their own colour from the artwork.
-        let accent: UInt32 = 0xFF6F_8FEF
+        // Kultr's orange, everywhere.
         let theme = KinemaTheme(
-            colors: .make(dark: dark, accent: accent, night: settings.nightMode),
+            colors: .make(dark: dark, night: settings.nightMode),
             radii: .of(settings.corners),
             settings: settings
         )

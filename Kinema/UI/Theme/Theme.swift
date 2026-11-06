@@ -21,10 +21,10 @@ extension Color {
 }
 
 /**
- * Kinema's palette is, like Kultr's, almost colourless. Colour arrives at
- * runtime: a title's page takes its accent from the title's own artwork, and
- * every glass surface and button on it picks that up, so each film's page
- * has the mood of the film.
+ * Kinema's palette is Kultr's: cream pages and warm black text in light
+ * mode, warm charcoal in dark (pure black with Night mode), and one orange
+ * for whatever you can tap. Colour is flat everywhere; the posters and
+ * backdrops are the only colourful things on screen.
  */
 struct KinemaColors: Equatable {
     var dark: Bool
@@ -47,60 +47,67 @@ struct KinemaColors: Equatable {
     var warning = Color(argb: 0xFFBD2E)
     var success = Color(argb: 0x45D67A)
 
-    var accentSoft: Color { accent.opacity(0.18) }
-    var accentGlow: Color { accent.opacity(0.35) }
+    /** Kultr's orange. */
+    static let orange: UInt32 = 0xFF7A3D
 
-    static func make(dark: Bool, accent picked: UInt32, night: Bool) -> KinemaColors {
-        // A pale colour from the artwork washes out on the light background, so
-        // in light mode it is darkened just enough to stay readable.
+    var accentSoft: Color { accent.opacity(0.18) }
+    /** The fill of a tinted button, like Apple Music's Play and Shuffle. */
+    var sand: Color { dark ? ink.opacity(0.1) : Color(argb: 0xEADFCC) }
+
+    static func make(dark: Bool, accent picked: UInt32 = orange, night: Bool) -> KinemaColors {
+        // The orange is darkened in light mode until it reads as text on cream.
         let argb = dark ? picked : readableOnLight(picked)
         let accent = Color(argb: argb)
-        let onAccent: Color = ArtworkColor.luminance(argb) > 0.45 ? Color(argb: 0x0A0A10) : .white
-        let inkBase = Color(argb: 0x0A0A10)
+        let inkBase = Color(argb: dark ? 0xF3EDE2 : 0x1F1A14)
+        // Whichever of white and ink reads better on the accent.
+        let onAccent: Color = ArtworkColor.luminance(argb) > 0.2 ? Color(argb: 0x1F1A14) : .white
         if dark {
+            // Night mode is for OLED screens: black pixels are switched off, so
+            // the background is true black and raised surfaces only just lift.
             return KinemaColors(
                 dark: true,
                 night: night,
                 accent: accent,
                 accentArgb: argb,
                 onAccent: onAccent,
-                background: Color(argb: night ? 0x000000 : 0x08080C),
-                elevated: Color(argb: night ? 0x0C0C10 : 0x121219),
-                ink: .white.opacity(0.96),
-                ink2: .white.opacity(0.66),
-                ink3: .white.opacity(0.42),
-                ink4: .white.opacity(0.22),
-                glass: .white.opacity(0.07),
-                glassStrong: .white.opacity(0.12),
-                edge: .white.opacity(0.14),
-                line: .white.opacity(0.09)
+                background: Color(argb: night ? 0x000000 : 0x1C1A17),
+                elevated: Color(argb: night ? 0x0E0D0B : 0x26231F),
+                ink: inkBase,
+                ink2: inkBase.opacity(0.7),
+                ink3: inkBase.opacity(0.5),
+                ink4: inkBase.opacity(0.26),
+                glass: inkBase.opacity(0.07),
+                glassStrong: inkBase.opacity(0.12),
+                edge: inkBase.opacity(0.22),
+                line: inkBase.opacity(0.1)
             )
         }
+        let paper = Color(argb: 0xFFFCF6)
         return KinemaColors(
             dark: false,
             accent: accent,
             accentArgb: argb,
             onAccent: onAccent,
-            background: Color(argb: 0xECEEF4),
-            elevated: Color(argb: 0xF7F8FC),
-            ink: inkBase.opacity(0.94),
-            ink2: inkBase.opacity(0.62),
-            ink3: inkBase.opacity(0.42),
-            ink4: inkBase.opacity(0.2),
-            glass: .white.opacity(0.55),
-            glassStrong: .white.opacity(0.72),
-            edge: inkBase.opacity(0.1),
-            line: inkBase.opacity(0.08)
+            background: Color(argb: 0xF6F0E5),
+            elevated: paper,
+            ink: inkBase,
+            ink2: Color(argb: 0x5A5046),
+            ink3: Color(argb: 0x6E6255),
+            ink4: Color(argb: 0xA89C8D),
+            glass: paper.opacity(0.8),
+            glassStrong: paper,
+            edge: inkBase.opacity(0.16),
+            line: inkBase.opacity(0.12)
         )
     }
 
     /**
-     * The colour darkened until its luminance is at most 0.22, so it reads as
-     * text on the light background. Hue stays, and pale colours gain a little
+     * The colour darkened until its luminance is at most 0.15, so it reads as
+     * text on cream (4.5:1). Hue stays, and pale colours gain a little
      * saturation so they turn deeper rather than grey.
      */
     static func readableOnLight(_ argb: UInt32) -> UInt32 {
-        let target = 0.22
+        let target = 0.15
         guard ArtworkColor.luminance(argb) > target else { return argb }
         var h: CGFloat = 0, s: CGFloat = 0, v: CGFloat = 0, a: CGFloat = 0
         UIColor(
@@ -144,17 +151,10 @@ struct KinemaTheme: Equatable {
     var settings: Settings
 
     static let fallback = KinemaTheme(
-        colors: .make(dark: true, accent: 0x6F8FEF, night: false),
+        colors: .make(dark: true, night: false),
         radii: .of(.soft),
         settings: Settings()
     )
-
-    /** The same theme with another accent, for a page tinted by its artwork. */
-    func tinted(_ argb: UInt32) -> KinemaTheme {
-        var copy = self
-        copy.colors = .make(dark: colors.dark, accent: argb, night: colors.night)
-        return copy
-    }
 }
 
 private struct KinemaThemeKey: EnvironmentKey {
@@ -168,23 +168,26 @@ extension EnvironmentValues {
     }
 }
 
-/** The type scale, in SF Pro. */
+/**
+ * The type scale, as in Kultr: on iOS's own text styles, so every size
+ * follows Larger Text in the iPhone's settings.
+ */
 enum KFont {
-    static let display = Font.system(size: 34, weight: .bold)
-    static let headlineLarge = Font.system(size: 32, weight: .bold)
-    static let headlineMedium = Font.system(size: 28, weight: .bold)
-    static let headlineSmall = Font.system(size: 24, weight: .bold)
-    static let titleLarge = Font.system(size: 22, weight: .bold)
-    static let titleMedium = Font.system(size: 17, weight: .semibold)
-    static let titleSmall = Font.system(size: 15, weight: .semibold)
-    static let bodyLarge = Font.system(size: 16)
-    static let bodyMedium = Font.system(size: 14)
-    static let bodySmall = Font.system(size: 12)
-    static let labelLarge = Font.system(size: 14, weight: .semibold)
-    static let labelMedium = Font.system(size: 12, weight: .medium)
-    static let labelSmall = Font.system(size: 11, weight: .medium)
-    /** Small caps-ish label used above headings ("MOVIE", "SERIES"). */
-    static let eyebrow = Font.system(size: 11, weight: .bold)
+    static let display = Font.largeTitle.bold()
+    static let headlineLarge = Font.largeTitle.bold()
+    static let headlineMedium = Font.title.bold()
+    static let headlineSmall = Font.title2.bold()
+    static let titleLarge = Font.title2.bold()
+    static let titleMedium = Font.headline
+    static let titleSmall = Font.subheadline.weight(.semibold)
+    static let bodyLarge = Font.body
+    static let bodyMedium = Font.subheadline
+    static let bodySmall = Font.footnote
+    static let labelLarge = Font.subheadline.weight(.semibold)
+    static let labelMedium = Font.footnote.weight(.medium)
+    static let labelSmall = Font.caption.weight(.medium)
+    /** A small label above a heading ("MOVIE", "SERIES"). */
+    static let eyebrow = Font.caption.weight(.semibold)
 }
 
 extension KinemaTheme {
@@ -214,36 +217,4 @@ extension KinemaTheme {
 
     /** A quick ease for things appearing and going. */
     var ease: Animation? { reduceMotion ? nil : .easeInOut(duration: 0.22) }
-}
-
-/**
- * Tints a page with the dominant colour of an image (a poster or backdrop).
- */
-private struct ArtworkTint: ViewModifier {
-    @Environment(\.kinema) private var theme
-    let image: ImageRef?
-    @State private var sampled: UInt32?
-
-    func body(content: Content) -> some View {
-        content
-            .environment(\.kinema, sampled.map { theme.tinted($0) } ?? theme)
-            .tint(sampled.map { Color(argb: $0) } ?? theme.colors.accent)
-            .task(id: image) {
-                guard let image else { return }
-                if let hash = image.blurHash, sampled == nil, let quick = BlurHash.averageColor(hash) {
-                    sampled = ArtworkColor.lift(Int((quick >> 16) & 0xff), Int((quick >> 8) & 0xff), Int(quick & 0xff))
-                }
-                guard let url = AppGraph.shared.imageURL(image, width: 160) else { return }
-                if let color = await ImageLoader.shared.dominantColor(url) {
-                    withAnimation(theme.reduceMotion ? nil : .easeInOut(duration: 0.6)) { sampled = color }
-                }
-            }
-    }
-}
-
-extension View {
-    /** Take the accent from [image] for everything inside. */
-    func artworkTint(_ image: ImageRef?) -> some View {
-        modifier(ArtworkTint(image: image))
-    }
 }

@@ -115,7 +115,7 @@ struct SearchScreen: View {
                                 .frame(height: 56)
                                 .background(
                                     RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous)
-                                        .fill(LinearGradient(colors: [genreColor(genre.name).opacity(0.55), genreColor(genre.name).opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                        .fill(genreColor(genre.name).opacity(0.28))
                                 )
                                 .overlay(RoundedRectangle(cornerRadius: theme.radii.md, style: .continuous).strokeBorder(c.edge, lineWidth: 1))
                         }

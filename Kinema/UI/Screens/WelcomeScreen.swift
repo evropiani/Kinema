@@ -54,7 +54,7 @@ struct WelcomeFlow: View {
             .padding(.top, 34)
             .padding(.horizontal, 28)
             Spacer()
-            WideGlassButton(title: "Connect to a server", icon: "server.rack", prominent: true) {
+            WideButton(title: "Connect to a server", icon: "server.rack", prominent: true) {
                 withAnimation(theme.ease) { connecting = true }
             }
             .padding(.horizontal, 24)
@@ -179,7 +179,7 @@ struct AddServerFlow: View {
                 .submitLabel(.go)
                 .onSubmit(connect)
             errorView
-            WideGlassButton(title: busy ? "Connecting…" : "Connect", icon: "arrow.right", prominent: true, enabled: !busy && !address.trimmingCharacters(in: .whitespaces).isEmpty, action: connect)
+            WideButton(title: busy ? "Connecting…" : "Connect", icon: "arrow.right", prominent: true, enabled: !busy && !address.trimmingCharacters(in: .whitespaces).isEmpty, action: connect)
                 .padding(.top, 20)
             Button {
                 address = "https://demo.jellyfin.org/stable"
@@ -273,10 +273,10 @@ struct AddServerFlow: View {
                     .submitLabel(.go)
                     .onSubmit(signIn)
                 errorView
-                WideGlassButton(title: busy ? "Signing in…" : "Sign In", icon: "arrow.right", prominent: true, enabled: !busy && !username.isEmpty, action: signIn)
+                WideButton(title: busy ? "Signing in…" : "Sign In", icon: "arrow.right", prominent: true, enabled: !busy && !username.isEmpty, action: signIn)
                     .padding(.top, 20)
                 if quickConnectAvailable {
-                    WideGlassButton(title: "Use Quick Connect", icon: "qrcode", prominent: false, enabled: !busy, action: startQuickConnect)
+                    WideButton(title: "Use Quick Connect", icon: "qrcode", prominent: false, enabled: !busy, action: startQuickConnect)
                         .padding(.top, 12)
                     Text("Approve a code on a device that's already signed in, without typing your password here.")
                         .font(KFont.bodySmall)
@@ -374,7 +374,7 @@ struct AddServerFlow: View {
             }
             .padding(.top, 16)
             errorView
-            WideGlassButton(title: "Use a password instead", icon: "key", prominent: false) {
+            WideButton(title: "Use a password instead", icon: "key", prominent: false) {
                 cancelQuickConnect()
                 withAnimation(theme.ease) { quickConnect = nil }
             }

@@ -28,7 +28,11 @@ struct GlassPanel<Content: View>: View {
     }
 }
 
-/** Rounded pill button, optionally filled with the accent. */
+/**
+ * A rounded pill button, as in Kultr: sand with an orange label, or filled
+ * with the orange. With [glass], liquid glass instead, for a pill that sits
+ * over the page (the Downloads title's Pause All).
+ */
 struct Pill: View {
     @Environment(\.kinema) private var theme
     let text: String
@@ -36,14 +40,16 @@ struct Pill: View {
     var accent = false
     var enabled = true
     var badge: String?
+    var glass = false
     let action: () -> Void
 
-    init(_ text: String, icon: String? = nil, accent: Bool = false, enabled: Bool = true, badge: String? = nil, action: @escaping () -> Void) {
+    init(_ text: String, icon: String? = nil, accent: Bool = false, enabled: Bool = true, badge: String? = nil, glass: Bool = false, action: @escaping () -> Void) {
         self.text = text
         self.icon = icon
         self.accent = accent
         self.enabled = enabled
         self.badge = badge
+        self.glass = glass
         self.action = action
     }
 
@@ -66,25 +72,30 @@ struct Pill: View {
                     .background(Capsule().fill(accent ? Color.white.opacity(0.22) : c.accentSoft))
             }
         }
-        if #available(iOS 26.0, *) {
-            if accent {
-                Button(action: tapped) { label.foregroundStyle(.white) }
-                    .buttonStyle(.glassProminent)
-                    .tint(c.accent)
-                    .disabled(!enabled)
-            } else {
-                Button(action: tapped) { label.foregroundStyle(c.ink.opacity(enabled ? 1 : 0.45)) }
-                    .buttonStyle(.glass)
-                    .disabled(!enabled)
+        if glass, #available(iOS 26.0, *) {
+            Button(action: tapped) { label.foregroundStyle(c.ink.opacity(enabled ? 1 : 0.45)) }
+                .buttonStyle(.glass)
+                .disabled(!enabled)
+        } else if glass {
+            Button(action: tapped) {
+                label
+                    .foregroundStyle(c.ink.opacity(enabled ? 1 : 0.5))
+                    .padding(.horizontal, 16)
+                    .frame(height: 36)
+                    .contentShape(Capsule())
             }
+            .buttonStyle(PressScaleStyle())
+            .kinemaGlass(Capsule(), interactive: true, shadow: false)
+            .disabled(!enabled)
         } else {
             Button(action: tapped) {
                 label
-                    .foregroundStyle((accent ? c.onAccent : c.ink).opacity(enabled ? 1 : 0.5))
+                    .foregroundStyle(accent ? c.onAccent : c.accent)
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(accent ? c.accent.opacity(enabled ? 1 : 0.5) : c.glass))
-                    .overlay(Capsule().strokeBorder(accent ? Color.clear : c.edge, lineWidth: 1))
+                    .frame(height: 36)
+                    .background(Capsule().fill(accent ? c.accent : c.sand))
+                    .opacity(enabled ? 1 : 0.45)
+                    .contentShape(Capsule())
             }
             .buttonStyle(PressScaleStyle())
             .disabled(!enabled)
@@ -300,35 +311,12 @@ struct Rule: View {
     }
 }
 
-/** A soft wash of the accent behind a header, fading into the background. */
-struct AccentWash: View {
-    @Environment(\.kinema) private var theme
-    var height: CGFloat = 320
-
-    var body: some View {
-        LinearGradient(colors: [theme.colors.accent.opacity(theme.colors.night ? 0.18 : 0.28), .clear], startPoint: .top, endPoint: .bottom)
-            .frame(height: height)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-    }
-}
-
-/** The colour field behind screens that have no artwork of their own. */
+/** The plain page colour behind screens: flat, as in Kultr. */
 struct PlainBackdrop: View {
     @Environment(\.kinema) private var theme
 
     var body: some View {
-        ZStack {
-            theme.colors.background
-            RadialGradient(
-                colors: [theme.colors.accent.opacity(theme.colors.night ? 0.12 : theme.colors.dark ? 0.22 : 0.16), .clear],
-                center: .topLeading,
-                startRadius: 0,
-                endRadius: 560
-            )
-        }
-        .ignoresSafeArea()
+        theme.colors.background.ignoresSafeArea()
     }
 }
 
@@ -356,11 +344,8 @@ struct ArtworkBackdrop: View {
                 .transition(.opacity)
                 .id(url)
             }
-            LinearGradient(
-                colors: [theme.colors.background.opacity(0.35), theme.colors.accent.opacity(0.08), theme.colors.background.opacity(0.92)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            // Flat, so text reads the same at the top and the bottom.
+            theme.colors.background.opacity(0.55)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)

@@ -35,12 +35,12 @@ struct UpdateScreen: View {
                     VStack(spacing: 10) {
                         if let ipa = release.ipaUrl {
                             ForEach(installers, id: \.name) { installer in
-                                WideGlassButton(title: "Update with \(installer.name)", icon: "arrow.down.app.fill", prominent: true) {
+                                WideButton(title: "Update with \(installer.name)", icon: "arrow.down.app.fill", prominent: true) {
                                     if let link = installer.link(for: ipa) { openURL(link) }
                                 }
                             }
                         }
-                        WideGlassButton(title: "Open the release page", icon: "safari", prominent: installers.isEmpty || release.ipaUrl == nil) {
+                        WideButton(title: "Open the release page", icon: "safari", prominent: installers.isEmpty || release.ipaUrl == nil) {
                             if let url = URL(string: release.pageUrl) { openURL(url) }
                         }
                     }

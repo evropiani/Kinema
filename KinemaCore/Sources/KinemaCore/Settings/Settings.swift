@@ -216,7 +216,8 @@ enum SeekSensitivity: String, Codable, CaseIterable, Hashable {
  */
 struct Settings: Codable, Hashable {
     // Appearance
-    var theme: ThemeMode = .dark
+    /** Light and dark follow the iPhone, as in Kultr. */
+    var theme: ThemeMode = .system
     var nightMode = false
     var corners: CornerStyle = .soft
     var posterSize: PosterSize = .medium

@@ -62,7 +62,6 @@ struct PersonScreen: View {
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
         .kinemaScreen(backdrop: person?.image(.primary))
-        .artworkTint(person?.image(.primary))
         .task(id: id) { await load() }
     }
 

@@ -369,11 +369,11 @@ struct LibraryGrid: View {
             Image(systemName: icon).font(.system(size: 13, weight: .semibold))
             Text(text).font(KFont.labelLarge).lineLimit(1)
         }
-        .foregroundStyle(on ? c.onAccent : c.ink)
+        // Kultr's chips: orange when set, sand with an orange label otherwise.
+        .foregroundStyle(on ? c.onAccent : c.accent)
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .background(Capsule().fill(on ? c.accent : c.glass))
-        .overlay(Capsule().strokeBorder(on ? .clear : c.edge, lineWidth: 1))
+        .background(Capsule().fill(on ? c.accent : c.sand))
     }
 
     private func pick(_ option: LibrarySort) {
@@ -406,7 +406,7 @@ struct LibraryGrid: View {
             }
         }
         .padding(.vertical, 6)
-        .background(Capsule().fill(c.glass))
+        .background(Capsule().fill(c.sand))
         .padding(.trailing, 2)
         .accessibilityLabel("Jump to letter")
     }

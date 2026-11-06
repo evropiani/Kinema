@@ -26,7 +26,7 @@ struct DownloadsScreen: View {
                     .minimumScaleFactor(0.8)
                 Spacer(minLength: 8)
                 if active.contains(where: { $0.state != .failed }) {
-                    Pill(downloads.allPaused ? "Resume All" : "Pause All", icon: downloads.allPaused ? "play.fill" : "pause.fill") {
+                    Pill(downloads.allPaused ? "Resume All" : "Pause All", icon: downloads.allPaused ? "play.fill" : "pause.fill", glass: true) {
                         if downloads.allPaused { downloads.resumeAll() } else { downloads.pauseAll() }
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
@@ -356,7 +356,7 @@ struct DownloadOptionsSheet: View {
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: theme.radii.sm, style: .continuous).fill(c.glassStrong))
             }
-            WideGlassButton(title: replacing ? "Download Again" : "Download", icon: "arrow.down.circle.fill", prominent: true) {
+            WideButton(title: replacing ? "Download Again" : "Download", icon: "arrow.down.circle.fill", prominent: true) {
                 let graph = AppGraph.shared
                 if languages.count > 1 { graph.settings.update { $0.downloadAudioLanguage = audio } }
                 if replacing { for item in items { graph.downloads.remove(item.id) } }

@@ -75,7 +75,6 @@ struct DetailScreen: View {
             }
         }
         .kinemaScreen(backdrop: current.backdropImage ?? current.posterImage)
-        .artworkTint(current.backdropImage ?? current.posterImage)
         .task(id: "\(seed.id)-\(graph.library.version)") { await load() }
     }
 
@@ -184,14 +183,14 @@ struct DetailScreen: View {
                         .opacity(0.85)
                     }
                 }
-                .foregroundStyle(glassTints ? .white : c.onAccent)
+                .foregroundStyle(c.onAccent)
                 .frame(maxWidth: .infinity)
                 .frame(height: resume ? 60 : 52)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressScaleStyle())
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(glassTints ? .clear : c.accent))
-            .kinemaGlass(RoundedRectangle(cornerRadius: 16, style: .continuous), tint: c.accent, interactive: true, shadow: false)
+            // Flat orange, as Kultr's Play.
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(c.accent))
             .accessibilityLabel(playLabel(item, target: target, resume: resume))
 
             GlassGroup(spacing: 14) {
@@ -214,11 +213,6 @@ struct DetailScreen: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
-    }
-
-    private var glassTints: Bool {
-        if #available(iOS 26.0, *) { return true }
-        return false
     }
 
     /** What the big button plays: the item, or for a series the next episode. */
@@ -246,9 +240,9 @@ struct DetailScreen: View {
             VStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(on ? c.accent : c.ink)
+                    .foregroundStyle(c.accent)
                     .frame(width: 48, height: 48)
-                    .kinemaGlass(Circle(), tint: on ? c.accent.opacity(0.3) : nil, interactive: true, shadow: false)
+                    .background(Circle().fill(on ? c.accentSoft : c.sand))
                 Text(label)
                     .font(KFont.labelSmall)
                     .foregroundStyle(c.ink2)
@@ -311,9 +305,9 @@ struct DetailScreen: View {
         return VStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(on ? c.accent : c.ink)
+                .foregroundStyle(c.accent)
                 .frame(width: 48, height: 48)
-                .kinemaGlass(Circle(), tint: on ? c.accent.opacity(0.3) : nil, interactive: true, shadow: false)
+                .background(Circle().fill(on ? c.accentSoft : c.sand))
             Text(label)
                 .font(KFont.labelSmall)
                 .foregroundStyle(c.ink2)
@@ -466,11 +460,10 @@ struct DetailScreen: View {
                                             DownloadBadge(item: season, size: 13, color: on ? c.onAccent : nil)
                                         }
                                         .font(KFont.labelLarge)
-                                        .foregroundStyle(on ? c.onAccent : c.ink)
+                                        .foregroundStyle(on ? c.onAccent : c.accent)
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 9)
-                                        .background(Capsule().fill(on ? c.accent : c.glass))
-                                        .overlay(Capsule().strokeBorder(on ? .clear : c.edge, lineWidth: 1))
+                                        .background(Capsule().fill(on ? c.accent : c.sand))
                                     }
                                     .buttonStyle(PressScaleStyle())
                                     .id(season.id)

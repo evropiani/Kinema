@@ -62,7 +62,6 @@ struct HomeScreen: View {
         .overlay(alignment: .topTrailing) { AccountButton().padding(.trailing, 16).padding(.top, 4) }
         .refreshable { await load() }
         .kinemaScreen()
-        .artworkTint(heroShown && featured.indices.contains(heroIndex) ? (featured[heroIndex].backdropImage ?? featured[heroIndex].posterImage) : nil)
         .task(id: "\(graph.auth.generation)-\(graph.library.version)") { await load() }
         .onAppear { hour = Calendar.current.component(.hour, from: Date()) }
     }
@@ -333,7 +332,7 @@ private struct HeroPage: View {
                 }
                 GlassGroup(spacing: 12) {
                     HStack(spacing: 12) {
-                        WideGlassButton(title: graph.library.resumeTicks(item) > 0 ? "Resume" : "Play", icon: "play.fill", prominent: true) {
+                        WideButton(title: graph.library.resumeTicks(item) > 0 ? "Resume" : "Play", icon: "play.fill", prominent: true) {
                             graph.actions.play(item)
                         }
                         .frame(maxWidth: 190)
